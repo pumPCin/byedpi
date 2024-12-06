@@ -31,9 +31,6 @@
 #include "packets.h"
 #include "error.h"
 
-#define WAIT_LIMIT_MS 500
-#define DEFAULT_TTL 8
-
 
 int setttl(int fd, int ttl)
 {
@@ -49,20 +46,8 @@ int setttl(int fd, int ttl)
     return 0;
 }
 
-
 #ifdef __linux__
-static int get_family(const struct sockaddr_in6 *dst)
-{
-    static const char map[12] = "\0\0\0\0\0\0\0\0\0\0\xff\xff";
-    if (dst->sin6_family == AF_INET6 
-            && !memcmp(&dst->sin6_addr, map, sizeof(map))) {
-        return AF_INET;
-    }
-    return dst->sin6_family;
-}
-
-
-static int drop_sack(int fd)
+int drop_sack(int fd)
 {
     struct sock_filter code[] = {
         { 0x30, 0, 0, 0x0000000c },
@@ -84,8 +69,10 @@ static int drop_sack(int fd)
     }
     return 0;
 }
+#endif
 
 
+#ifndef _WIN32
 static inline void delay(long ms)
 {
     struct timespec time = { 
@@ -93,13 +80,15 @@ static inline void delay(long ms)
     };
     nanosleep(&time, 0);
 }
+#else
+#define delay(ms) Sleep(ms)
+#endif
 
-
-static void wait_send_if_support(int sfd)
+#ifdef __linux__
+void wait_send(int sfd)
 {
-    int i = 0;
-    for (; params.wait_send && i < WAIT_LIMIT_MS; i++) {
-        struct tcp_info tcpi;
+    for (int i = 0; params.wait_send && i < 500; i++) {
+        struct tcp_info tcpi = {};
         socklen_t ts = sizeof(tcpi);
         
         if (getsockopt(sfd, IPPROTO_TCP,
@@ -109,38 +98,48 @@ static void wait_send_if_support(int sfd)
         }
         if (tcpi.tcpi_state != 1) {
             LOG(LOG_E, "state: %d\n", tcpi.tcpi_state);
-            break;
+            return;
         }
-        if (ts <= offsetof(struct tcp_info, tcpi_notsent_bytes)) {
+        size_t s = (char *)&tcpi.tcpi_notsent_bytes - (char *)&tcpi.tcpi_state;
+        if (ts < s) {
             LOG(LOG_E, "tcpi_notsent_bytes not provided\n");
             params.wait_send = 0;
             break;
         }
         if (tcpi.tcpi_notsent_bytes == 0) {
-            break;
+            return;
         }
+        LOG(LOG_S, "not sent after %d ms\n", i);
         delay(1);
     }
-    if (i) LOG(LOG_S, "waiting for send: %d ms\n", i);
+    delay(params.sfdelay);
 }
+#define wait_send_if_support(sfd) \
+    if (params.wait_send) wait_send(sfd)
 #else
-#define wait_send_if_support(sfd)
+#define wait_send(sfd) delay(params.sfdelay)
+#define wait_send_if_support(sfd) // :(
 #endif
 
-
-static struct packet get_tcp_fake(const char *buffer, size_t n,
-        struct proto_info *info, const struct desync_params *opt)
+#ifdef __linux__
+ssize_t send_fake(int sfd, char *buffer,
+        int cnt, long pos, struct desync_params *opt)
 {
+    struct sockaddr_in6 addr = {};
+    socklen_t addr_size = sizeof(addr);
+    if (opt->md5sig) {
+        if (getpeername(sfd, 
+                (struct sockaddr *)&addr, &addr_size) < 0) {
+            uniperror("getpeername");
+            return -1;
+        }
+    }
     struct packet pkt;
     if (opt->fake_data.data) {
         pkt = opt->fake_data;
     }
     else {
-        if (!info->type) {
-            if (is_tls_chello(buffer, n)) info->type = IS_HTTPS;
-            else if (is_http(buffer, n)) info->type = IS_HTTP;
-        }
-        pkt = info->type == IS_HTTP ? fake_http : fake_tls;
+        pkt = cnt != IS_HTTP ? fake_tls : fake_http;
     }
     if (opt->fake_offset) {
         if (pkt.size > opt->fake_offset) { 
@@ -148,24 +147,6 @@ static struct packet get_tcp_fake(const char *buffer, size_t n,
             pkt.data += opt->fake_offset;
         }
         else pkt.size = 0;
-    }
-    return pkt;
-}
-
-
-#ifdef __linux__
-static ssize_t send_fake(int sfd, const char *buffer,
-        long pos, const struct desync_params *opt, struct packet pkt)
-{
-    struct sockaddr_in6 addr = {};
-    socklen_t addr_size = sizeof(addr);
-    
-    if (opt->md5sig || opt->ip_options) {
-        if (getpeername(sfd, 
-                (struct sockaddr *)&addr, &addr_size) < 0) {
-            uniperror("getpeername");
-            return -1;
-        }
     }
     int fds[2];
     if (pipe(fds) < 0) {
@@ -184,7 +165,7 @@ static ssize_t send_fake(int sfd, const char *buffer,
         }
         memcpy(p, pkt.data, pkt.size < pos ? pkt.size : pos);
         
-        if (setttl(sfd, opt->ttl ? opt->ttl : DEFAULT_TTL) < 0) {
+        if (setttl(sfd, opt->ttl ? opt->ttl : 8) < 0) {
             break;
         }
         if (opt->md5sig) {
@@ -199,11 +180,11 @@ static ssize_t send_fake(int sfd, const char *buffer,
                 break;
             }
         }
-        if (opt->ip_options && get_family(&addr) == AF_INET 
+        if (opt->ip_options 
             && setsockopt(sfd, IPPROTO_IP, IP_OPTIONS,
                 opt->ip_options, opt->ip_options_len) < 0) {
             uniperror("setsockopt IP_OPTIONS");
-            break;
+            //break;
         }
         struct iovec vec = { .iov_base = p, .iov_len = pos };
         
@@ -217,17 +198,17 @@ static ssize_t send_fake(int sfd, const char *buffer,
             uniperror("splice");
             break;
         }
-        wait_send_if_support(sfd);
+        wait_send(sfd);
         memcpy(p, buffer, pos);
         
         if (setttl(sfd, params.def_ttl) < 0) {
             break;
         }
-        if (opt->ip_options && get_family(&addr) == AF_INET 
+        if (opt->ip_options 
             && setsockopt(sfd, IPPROTO_IP,
                 IP_OPTIONS, opt->ip_options, 0) < 0) {
             uniperror("setsockopt IP_OPTIONS");
-            break;
+            //break;
         }
         if (opt->md5sig) {
             struct tcp_md5sig md5 = {
@@ -253,9 +234,24 @@ static ssize_t send_fake(int sfd, const char *buffer,
 #ifdef _WIN32
 OVERLAPPED ov = {};
 
-static ssize_t send_fake(int sfd, const char *buffer,
-        long pos, const struct desync_params *opt, struct packet pkt)
+ssize_t send_fake(int sfd, char *buffer,
+        int cnt, long pos, struct desync_params *opt)
 {
+    struct packet pkt;
+    if (opt->fake_data.data) {
+        pkt = opt->fake_data;
+    }
+    else {
+        pkt = cnt != IS_HTTP ? fake_tls : fake_http;
+    }
+    if (opt->fake_offset) {
+        if (pkt.size > opt->fake_offset) { 
+            pkt.size -= opt->fake_offset;
+            pkt.data += opt->fake_offset;
+        }
+        else pkt.size = 0;
+    }
+    
     char path[MAX_PATH], temp[MAX_PATH + 1];
     int ps = GetTempPath(sizeof(temp), temp);
     if (!ps) {
@@ -302,7 +298,7 @@ static ssize_t send_fake(int sfd, const char *buffer,
             uniperror("SetFilePointer");
             break;
         }
-        if (setttl(sfd, opt->ttl ? opt->ttl : DEFAULT_TTL) < 0) {
+        if (setttl(sfd, opt->ttl ? opt->ttl : 8) < 0) {
             break;
         }
         if (!TransmitFile(sfd, hfile, pos, pos, &ov, 
@@ -313,7 +309,7 @@ static ssize_t send_fake(int sfd, const char *buffer,
                 break;
             }
         }
-        //Sleep(3);
+        wait_send(sfd);
         
         if (SetFilePointer(hfile, 0, 0, FILE_BEGIN) == INVALID_SET_FILE_POINTER) {
             uniperror("SetFilePointer");
@@ -338,8 +334,8 @@ static ssize_t send_fake(int sfd, const char *buffer,
 }
 #endif
 
-static ssize_t send_oob(int sfd, char *buffer,
-        ssize_t n, long pos, const char *c)
+ssize_t send_oob(int sfd, char *buffer,
+        ssize_t n, long pos, char *c)
 {
     char rchar = buffer[pos];
     buffer[pos] = c[1] ? c[0] : 'a';
@@ -361,8 +357,8 @@ static ssize_t send_oob(int sfd, char *buffer,
 }
 
 
-static ssize_t send_disorder(int sfd, 
-        const char *buffer, long pos)
+ssize_t send_disorder(int sfd, 
+        char *buffer, long pos)
 {
     int bttl = 1;
     
@@ -382,8 +378,8 @@ static ssize_t send_disorder(int sfd,
 }
 
 
-static ssize_t send_late_oob(int sfd, char *buffer,
-        ssize_t n, long pos, const char *c)
+ssize_t send_late_oob(int sfd, char *buffer,
+        ssize_t n, long pos, char *c)
 {
     int bttl = 1;
     
@@ -401,42 +397,21 @@ static ssize_t send_late_oob(int sfd, char *buffer,
 }
 
 
-static void init_proto_info(
-        const char *buffer, size_t n, struct proto_info *info)
-{
-    if (!info->init) {
-        char *host = 0;
-        
-        if ((info->host_len = parse_tls(buffer, n, &host))) {
-            info->type = IS_HTTPS;
-        }
-        else if ((info->host_len = parse_http(buffer, n, &host, 0))) {
-            info->type = IS_HTTP;
-        }
-        info->host_pos = host ? host - buffer : 0;
-        info->init = 1;
-    }
-}
-
-
 static long gen_offset(long pos, int flag,
-        const char *buffer, size_t n, long lp, struct proto_info *info)
+        ssize_t n, long lp, int type, int hp, int len)
 {
     if (flag & (OFFSET_SNI | OFFSET_HOST)) {
-        init_proto_info(buffer, n, info);
-        
-        if (!info->host_pos 
-                || ((flag & OFFSET_SNI) && info->type != IS_HTTPS)) {
+        if (!hp || ((flag & OFFSET_SNI) && type != IS_HTTPS)) {
             return -1;
         }
-        pos += info->host_pos;
+        pos += hp;
         
         if (flag & OFFSET_END)
-            pos += info->host_len;
+            pos += len;
         else if (flag & OFFSET_MID)
-            pos += (info->host_len / 2);
+            pos += (len / 2);
         else if (flag & OFFSET_RAND)
-            pos += (rand() % info->host_len);
+            pos += (rand() % len);
     }
     else if (flag & OFFSET_RAND) {
         pos += lp + (rand() % (n - lp));
@@ -451,33 +426,50 @@ static long gen_offset(long pos, int flag,
 }
 
 
-static ssize_t tamp(char *buffer, size_t bfsize, ssize_t n, 
-        const struct desync_params *dp, struct proto_info *info)
+ssize_t desync(int sfd, char *buffer, size_t bfsize,
+        ssize_t n, ssize_t offset, struct sockaddr *dst, int dp_c)
 {
-    if (dp->mod_http && is_http(buffer, n)) {
-        LOG(LOG_S, "modify HTTP: n=%zd\n", n);
-        if (mod_http(buffer, n, dp->mod_http)) {
-            LOG(LOG_E, "mod http error\n");
+    struct desync_params dp = params.dp[dp_c];
+    
+    char *host = 0;
+    int len = 0, type = 0, host_pos = 0;
+    
+    if (offset == 0) {
+        if ((len = parse_tls(buffer, n, &host))) {
+            type = IS_HTTPS;
+        }
+        else if ((len = parse_http(buffer, n, &host, 0))) {
+            type = IS_HTTP;
+        }
+        if (len && host) {
+            LOG(LOG_S, "host: %.*s (%zd)\n",
+                len, host, host - buffer);
+            host_pos = host - buffer;
         }
     }
-    else if (dp->tlsrec_n && is_tls_chello(buffer, n)) {
+    // modify packet
+    if (type == IS_HTTP && dp.mod_http) {
+        LOG(LOG_S, "modify HTTP: n=%zd\n", n);
+        if (mod_http(buffer, n, dp.mod_http)) {
+            LOG(LOG_E, "mod http error\n");
+            return -1;
+        }
+    }
+    else if (type == IS_HTTPS && dp.tlsrec_n) {
         long lp = 0;
         struct part part;
         int i = 0, r = 0, rc = 0;
         
-        for (; r > 0 || i < dp->tlsrec_n; rc++, r--) {
+        for (; r > 0 || i < dp.tlsrec_n; rc++, r--) {
             if (r <= 0) {
-                part = dp->tlsrec[i];
+                part = dp.tlsrec[i];
                 r = part.r; i++;
             }
             long pos = rc * 5;
             pos += gen_offset(part.pos, 
-                part.flag, buffer, n - pos, lp, info);
-                
-            if (part.pos != pos) {
-                pos -= 5;
-            }
-            pos += (long )part.s * (part.r - r);
+                part.flag, n - pos - 5, lp, type, host_pos - 5, len);
+            
+            pos += part.s * (part.r - r);
             if (pos < lp) {
                 LOG(LOG_E, "tlsrec cancel: %ld < %ld\n", pos, lp);
                 break;
@@ -492,28 +484,6 @@ static ssize_t tamp(char *buffer, size_t bfsize, ssize_t n,
             lp = pos + 5;
         }
     }
-    return n;
-}
-
-
-ssize_t desync(int sfd, char *buffer, size_t bfsize,
-        ssize_t n, ssize_t offset, const struct sockaddr *dst, int dp_c)
-{
-    struct desync_params dp = params.dp[dp_c];
-    struct proto_info info = { 0 };
-    
-    if (offset == 0 && params.debug) {
-        init_proto_info(buffer, n, &info);
-        
-        if (info.host_pos) {
-            LOG(LOG_S, "host: %.*s (%d)\n",
-                info.host_len, buffer + info.host_pos, info.host_pos);
-        } else {
-            INIT_HEX_STR(buffer, (n > 16 ? 16 : n));
-            LOG(LOG_S, "bytes: %s (%zd)\n", HEX_STR, n);
-        }
-    }
-    n = tamp(buffer, bfsize, n, &dp, &info);
     #ifdef __linux__
     if (!offset && dp.drop_sack && drop_sack(sfd)) {
         return -1;
@@ -528,8 +498,10 @@ ssize_t desync(int sfd, char *buffer, size_t bfsize,
             part = dp.parts[i];
             r = part.r; i++;
         }
-        long pos = gen_offset(part.pos, part.flag, buffer, n, lp, &info);
-        pos += (long )part.s * (part.r - r);
+        long pos = gen_offset(part.pos,
+            part.flag, n, lp, type, host_pos, len);
+            
+        pos += part.s * (part.r - r);
         
         if (!(part.flag & OFFSET_START) && offset && pos <= offset) {
             LOG(LOG_S, "offset: %zd, skip\n", offset);
@@ -545,7 +517,7 @@ ssize_t desync(int sfd, char *buffer, size_t bfsize,
             #ifdef FAKE_SUPPORT
             case DESYNC_FAKE:
                 if (pos != lp) s = send_fake(sfd, 
-                    buffer + lp, pos - lp, &dp, get_tcp_fake(buffer, n, &info, &dp));
+                    buffer + lp, type, pos - lp, &dp);
                 break;
             #endif
             case DESYNC_DISORDER:
@@ -619,7 +591,7 @@ int post_desync(int sfd, int dp_c)
 
 
 ssize_t desync_udp(int sfd, char *buffer, size_t bfsize,
-        ssize_t n, const struct sockaddr *dst, int dp_c)
+        ssize_t n, struct sockaddr *dst, int dp_c)
 {
     struct desync_params *dp = &params.dp[dp_c];
     
@@ -638,7 +610,7 @@ ssize_t desync_udp(int sfd, char *buffer, size_t bfsize,
             }
             else pkt.size = 0;
         }
-        int bttl = dp->ttl ? dp->ttl : DEFAULT_TTL;
+        int bttl = dp->ttl ? dp->ttl : 8;
         if (setttl(sfd, bttl) < 0) {
             return -1;
         }

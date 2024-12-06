@@ -39,6 +39,7 @@ fake_udp = {
 
 
 struct params params = {
+    .sfdelay = 3,
     .wait_send = 1,
     
     .cache_ttl = 100800,
@@ -58,7 +59,7 @@ struct params params = {
 };
 
 
-const static char help_text[] = {
+const char help_text[] = {
     "    -i, --ip, <ip>            Listening IP, default 0.0.0.0\n"
     "    -p, --port <num>          Listening port, default 1080\n"
     #ifdef __linux__
@@ -82,7 +83,7 @@ const static char help_text[] = {
     #ifdef TIMEOUT_SUPPORT
     "    -T, --timeout <sec>       Timeout waiting for response, after which trigger auto\n"
     #endif
-    "    -K, --proto <t,h,u,i>     Protocol whitelist: tls,http,udp,ipv4\n"
+    "    -K, --proto <t,h,u>       Protocol whitelist: tls,http,udp\n"
     "    -H, --hosts <file|:str>   Hosts whitelist, filename or :string\n"
     "    -V, --pf <port[-portr]>   Ports range whitelist\n"
     "    -R, --round <num[-numr]>  Number of request to which desync will be applied\n"
@@ -162,6 +163,7 @@ const struct option options[] = {
     {"tlsrec",        1, 0, 'r'},
     {"udp-fake",      1, 0, 'a'},
     {"def-ttl",       1, 0, 'g'},
+    {"delay",         1, 0, 'w'}, //
     {"not-wait-send", 0, 0, 'W'}, //
     #ifdef __linux__
     {"drop-sack",     0, 0, 'Y'},
@@ -685,9 +687,6 @@ int main(int argc, char **argv)
                     case 'u': 
                         dp->proto |= IS_UDP;
                         break;
-                    case 'i': 
-                        dp->proto |= IS_IPV4;
-                        break;
                     default:
                         invalid = 1;
                         continue;
@@ -900,6 +899,13 @@ int main(int argc, char **argv)
             
         case 'Y':
             dp->drop_sack = 1;
+            break;
+            
+        case 'w': //
+            params.sfdelay = strtol(optarg, &end, 0);
+            if (params.sfdelay < 0 || optarg == end 
+                    || params.sfdelay >= 1000 || *end)
+                invalid = 1;
             break;
         
         case 'W':
