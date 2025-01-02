@@ -83,7 +83,6 @@ static int cache_get(struct sockaddr_ina *dst)
     }
     time_t t = time(0);
     if (t > val->time + params.cache_ttl) {
-        LOG(LOG_S, "time=%jd, now=%jd, ignore\n", (intmax_t)val->time, (intmax_t)t);
         return 0;
     }
     return val->m;
@@ -99,11 +98,9 @@ static int cache_add(struct sockaddr_ina *dst, int m)
     
     INIT_ADDR_STR((*dst));
     if (m == 0) {
-        LOG(LOG_S, "delete ip: %s\n", ADDR_STR);
         mem_delete(params.mempool, (char *)key, len);
         return 0;
     }
-    LOG(LOG_S, "save ip: %s, m=%d\n", ADDR_STR, m);
     time_t t = time(0);
 
     struct elem *val = mem_add(params.mempool, (char *)key, len);
@@ -116,13 +113,11 @@ static int cache_add(struct sockaddr_ina *dst, int m)
     return 0;
 }
 
-
 static inline bool check_port(uint16_t *p, struct sockaddr_in6 *dst)
 {
     return (dst->sin6_port >= p[0] 
             && dst->sin6_port <= p[1]);
 }
-
 
 int connect_hook(struct poolhd *pool, struct eval *val, 
         struct sockaddr_ina *dst, int next)
@@ -332,7 +327,6 @@ static int setup_conn(struct eval *client, char *buffer, ssize_t n)
         }
     }
     if (m >= params.dp_count) {
-        LOG(LOG_E, "drop connection (m=%d)\n", m);
         return -1;
     }
     if (params.auto_level > AUTO_NOBUFF && params.dp_count > 1) {
@@ -454,8 +448,6 @@ ssize_t tcp_send_hook(struct eval *remote,
             skip = 1;
         }
         else {
-            LOG((m ? LOG_S : LOG_L), "desync TCP, m=%d, r=%d\n", m, r);
-            
             ssize_t offset = remote->pair->round_sent;
             if (!offset && remote->round_count) offset = -1;
             
@@ -541,7 +533,6 @@ ssize_t udp_hook(struct eval *val,
     if (!check_round(params.dp[m].rounds, r)) {
         return send(val->fd, buffer, n, 0);
     }
-    LOG(LOG_S, "desync UDP, m=%d, r=%d\n", m, r);
     return desync_udp(val->fd, buffer, bfsize, n, &dst->sa, m);
 }
 

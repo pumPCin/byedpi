@@ -97,19 +97,16 @@ void wait_send(int sfd)
             break;
         }
         if (tcpi.tcpi_state != 1) {
-            LOG(LOG_E, "state: %d\n", tcpi.tcpi_state);
             return;
         }
         size_t s = (char *)&tcpi.tcpi_notsent_bytes - (char *)&tcpi.tcpi_state;
         if (ts < s) {
-            LOG(LOG_E, "tcpi_notsent_bytes not provided\n");
             params.wait_send = 0;
             break;
         }
         if (tcpi.tcpi_notsent_bytes == 0) {
             return;
         }
-        LOG(LOG_S, "not sent after %d ms\n", i);
         delay(1);
     }
     delay(params.sfdelay);
@@ -262,7 +259,6 @@ ssize_t send_fake(int sfd, char *buffer,
         uniperror("GetTempFileName");
         return -1;
     }
-    LOG(LOG_L, "temp file: %s\n", path);
     
     HANDLE hfile = CreateFileA(path, GENERIC_READ | GENERIC_WRITE, 
         FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, CREATE_ALWAYS, 
@@ -442,16 +438,12 @@ ssize_t desync(int sfd, char *buffer, size_t bfsize,
             type = IS_HTTP;
         }
         if (len && host) {
-            LOG(LOG_S, "host: %.*s (%zd)\n",
-                len, host, host - buffer);
             host_pos = host - buffer;
         }
     }
     // modify packet
     if (type == IS_HTTP && dp.mod_http) {
-        LOG(LOG_S, "modify HTTP: n=%zd\n", n);
         if (mod_http(buffer, n, dp.mod_http)) {
-            LOG(LOG_E, "mod http error\n");
             return -1;
         }
     }
@@ -471,15 +463,12 @@ ssize_t desync(int sfd, char *buffer, size_t bfsize,
             
             pos += part.s * (part.r - r);
             if (pos < lp) {
-                LOG(LOG_E, "tlsrec cancel: %ld < %ld\n", pos, lp);
                 break;
             }
             if (!part_tls(buffer + lp, 
                     bfsize - lp, n - lp, pos - lp)) {
-                LOG(LOG_E, "tlsrec error: pos=%ld, n=%zd\n", pos, n);
                 break;
             }
-            LOG(LOG_S, "tlsrec: pos=%ld, n=%zd\n", pos, n);
             n += 5;
             lp = pos + 5;
         }
@@ -504,11 +493,9 @@ ssize_t desync(int sfd, char *buffer, size_t bfsize,
         pos += part.s * (part.r - r);
         
         if (!(part.flag & OFFSET_START) && offset && pos <= offset) {
-            LOG(LOG_S, "offset: %zd, skip\n", offset);
             continue;
         }
         if (pos < 0 || pos > n || pos < lp) {
-            LOG(LOG_E, "split cancel: pos=%ld-%ld, n=%zd\n", lp, pos, n);
             break;
         }
         
@@ -544,7 +531,6 @@ ssize_t desync(int sfd, char *buffer, size_t bfsize,
             default:
                 return -1;
         }
-        LOG(LOG_S, "split: pos=%ld-%ld (%zd), m: %s\n", lp, pos, s, demode_str[part.m]);
         
         if (s < 0) {
             if (get_e() == EAGAIN) {
@@ -553,14 +539,12 @@ ssize_t desync(int sfd, char *buffer, size_t bfsize,
             return -1;
         } 
         else if (s != (pos - lp)) {
-            LOG(LOG_E, "%zd != %ld\n", s, pos - lp);
             return lp + s;
         }
         lp = pos;
     }
     // send all/rest
     if (lp < n) {
-        LOG((lp ? LOG_S : LOG_L), "send: pos=%ld-%zd\n", lp, n);
         if (send(sfd, buffer + lp, n - lp, 0) < 0) {
             if (get_e() == EAGAIN) {
                 return lp;
