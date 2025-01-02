@@ -132,7 +132,6 @@ static int resolve(char *host, int len,
     
     char rchar = host[len];
     host[len] = '\0';
-    LOG(LOG_S, "resolve: %s\n", host);
     
     if (getaddrinfo(host, 0, &hints, &res) || !res) {
         host[len] = rchar;
@@ -244,7 +243,6 @@ static int s4_get_addr(const char *buff,
             return -1;
         }
         if (resolve(id_end + 1, len, dst, SOCK_STREAM)) {
-            LOG(LOG_E, "not resolved: %.*s\n", len, id_end + 1);
             return -1;
         }
     }
@@ -261,7 +259,6 @@ static int s5_get_addr(const char *buffer,
         size_t n, struct sockaddr_ina *addr, int type) 
 {
     if (n < S_SIZE_MIN) {
-        LOG(LOG_E, "ss: request too small\n");
         return -S_ER_GEN;
     }
     struct s5_req *r = (struct s5_req *)buffer;
@@ -270,7 +267,6 @@ static int s5_get_addr(const char *buffer,
             (r->atp == S_ATP_ID ? r->id.len + S_SIZE_ID : 
             (r->atp == S_ATP_I6 ? S_SIZE_I6 : 0)));
     if (n < o)  {
-        LOG(LOG_E, "ss: bad request\n");
         return -S_ER_GEN;
     }
     switch (r->atp) {
@@ -285,7 +281,6 @@ static int s5_get_addr(const char *buffer,
             }
             if (r->id.len < 3 || 
                     resolve(r->id.domain, r->id.len, addr, type)) {
-                LOG(LOG_E, "not resolved: %.*s\n", r->id.len, r->id.domain);
                 return -S_ER_HOST;
             }
             break;
@@ -342,7 +337,6 @@ static int remote_sock(struct sockaddr_ina *dst, int type)
         map_fix(dst, 0);
     }
     if (dst->sa.sa_family != params.baddr.sin6_family) {
-        LOG(LOG_E, "different addresses family\n");
         return -1;
     }
     int sfd = nb_socket(dst->sa.sa_family, type);
@@ -409,13 +403,8 @@ int create_conn(struct poolhd *pool,
     }
     if (params.debug) {
         INIT_ADDR_STR((*dst));
-        LOG(LOG_S, "new conn: fd=%d, pair=%d, addr=%s:%d\n", 
-            sfd, val->fd, ADDR_STR, ntohs(dst->in.sin_port));
-    }
+     }
     int status = connect(sfd, &addr.sa, SA_SIZE(&addr));
-    if (status == 0 && params.tfo) {
-        LOG(LOG_S, "TFO supported!\n");
-    }
     if (status < 0 && 
             get_e() != EINPROGRESS && get_e() != EAGAIN) {
         uniperror("connect");
@@ -495,8 +484,6 @@ static int udp_associate(struct poolhd *pool,
     }
     if (params.debug) {
         INIT_ADDR_STR((*dst));
-        LOG(LOG_S, "udp associate: fds=%d,%d,%d addr=%s:%d\n", 
-            ufd, cfd, val->fd, ADDR_STR, ntohs(dst->in.sin_port));
     }
     val->type = EV_IGNORE;
     val->pair = client;
@@ -551,7 +538,6 @@ static inline int transp_conn(struct poolhd *pool, struct eval *val)
     if (self.sa.sa_family == remote.sa.sa_family && 
             self.in.sin_port == remote.in.sin_port && 
                 addr_equ(&self, &remote)) {
-        LOG(LOG_E, "connect to self, ignore\n");
         return -1;
     }
     int error = connect_hook(pool, val, &remote, EV_CONNECT);
@@ -582,7 +568,6 @@ static int on_accept(struct poolhd *pool, const struct eval *val)
             uniperror("accept");
             return -1;
         }
-        LOG(LOG_S, "accept: fd=%d\n", c);
         #ifndef __linux__
         #ifdef _WIN32
         unsigned long mode = 1;
@@ -626,7 +611,6 @@ static int on_tunnel(struct poolhd *pool, struct eval *val,
     struct eval *pair = val->pair;
     
     if (etype & POLLOUT) {
-        LOG(LOG_S, "pollout (fd=%d)\n", val->fd);
         val = pair;
         pair = val->pair;
     }
@@ -672,7 +656,6 @@ static int on_tunnel(struct poolhd *pool, struct eval *val,
             return -1;
         }
         if (sn < n) {
-            LOG(LOG_S, "send: %zd != %zd (fd=%d)\n", sn, n, pair->fd);
             assert(!(val->buff.size || val->buff.offset));
             
             val->buff.size = n - sn;
@@ -741,7 +724,6 @@ static int on_udp_tunnel(struct eval *val, char *buffer, size_t bfsize)
             }
             int offs = s5_get_addr(data, n, &addr, SOCK_DGRAM);
             if (offs < 0) {
-                LOG(LOG_E, "udp parse error\n");
                 return -1;
             }
             if (!pair->in6.sin6_port) {
@@ -800,7 +782,6 @@ static inline int on_request(struct poolhd *pool, struct eval *val,
             return 0;
         }
         if (n < S_SIZE_MIN) {
-            LOG(LOG_E, "ss: request too small (%zd)\n", n);
             return -1;
         }
         struct s5_req *r = (struct s5_req *)buffer;
@@ -821,7 +802,6 @@ static inline int on_request(struct poolhd *pool, struct eval *val,
                     break;
                 }
             default:
-                LOG(LOG_E, "ss: unsupported cmd: 0x%x\n", r->cmd);
                 s5e = -S_ER_CMD;
         }
         if (s5e < 0) {
@@ -842,14 +822,12 @@ static inline int on_request(struct poolhd *pool, struct eval *val,
         error = connect_hook(pool, val, &dst, EV_CONNECT);
     }
     else {
-        LOG(LOG_E, "ss: invalid version: 0x%x (%zd)\n", *buffer, n);
         return -1;
     }
     if (error) {
         int en = get_e();
         if (resp_error(val->fd, en ? en : error, val->flag) < 0)
             uniperror("send");
-        LOG(LOG_S, "ss error: %d\n", en);
         return -1;
     }
     return 0;
@@ -891,9 +869,6 @@ static void close_conn(struct poolhd *pool, struct eval *val)
 {
     struct eval *cval = val;
     do {
-        LOG(LOG_S, "close: fd=%d (pair=%d), recv: %zd, rounds: %d\n", 
-            cval->fd, cval->pair ? cval->pair->fd : -1, 
-            cval->recv_count, cval->round_count);
         cval = cval->pair;
     } while (cval && cval != val);
     del_event(pool, val);
@@ -934,7 +909,6 @@ int event_loop(int srvfd)
         }
         assert(val->type >= 0
             && val->type < sizeof(eid_name)/sizeof(*eid_name));
-        LOG(LOG_L, "new event: fd: %d, evt: %s, mod_iter: %llu\n", val->fd, eid_name[val->type], val->mod_iter);
         
         switch (val->type) {
             case EV_ACCEPT:
@@ -975,11 +949,9 @@ int event_loop(int srvfd)
                 continue;
             
             default:
-                LOG(LOG_E, "???\n");
                 NOT_EXIT = 0;
         }
     }
-    LOG(LOG_S, "exit\n");
     free(buffer);
     destroy_pool(pool);
     return 0;

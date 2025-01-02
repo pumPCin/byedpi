@@ -1,4 +1,3 @@
-
 TARGET = ciadpi
 
 CPPFLAGS = -D_DEFAULT_SOURCE

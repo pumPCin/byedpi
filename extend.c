@@ -83,7 +83,6 @@ static int cache_get(const struct sockaddr_ina *dst)
     }
     time_t t = time(0);
     if (t > val->time + params.cache_ttl) {
-        LOG(LOG_S, "time=%jd, now=%jd, ignore\n", (intmax_t)val->time, (intmax_t)t);
         return 0;
     }
     return val->m;
@@ -99,11 +98,9 @@ static int cache_add(const struct sockaddr_ina *dst, int m)
     
     INIT_ADDR_STR((*dst));
     if (m == 0) {
-        LOG(LOG_S, "delete ip: %s\n", ADDR_STR);
         mem_delete(params.mempool, (char *)key, len);
         return 0;
     }
-    LOG(LOG_S, "save ip: %s, m=%d\n", ADDR_STR, m);
     time_t t = time(0);
     
     char *key_d = malloc(len);
@@ -369,7 +366,6 @@ static int setup_conn(struct eval *client, const char *buffer, ssize_t n)
         }
     }
     if (m >= params.dp_count) {
-        LOG(LOG_E, "drop connection (m=%d)\n", m);
         return -1;
     }
     if (params.auto_level > AUTO_NOBUFF && params.dp_count > 1) {
@@ -492,8 +488,6 @@ ssize_t tcp_send_hook(struct eval *remote,
             skip = 1;
         }
         else {
-            LOG(LOG_S, "desync TCP: group=%d, round=%d, fd=%d\n", m, r, remote->fd);
-            
             ssize_t offset = remote->pair->round_sent;
             if (!offset && remote->round_count) offset = -1;
             
@@ -578,7 +572,6 @@ ssize_t udp_hook(struct eval *val,
     if (!check_round(params.dp[m].rounds, r)) {
         return send(val->fd, buffer, n, 0);
     }
-    LOG(LOG_S, "desync UDP: group=%d, round=%d, fd=%d\n", m, r, val->fd);
     return desync_udp(val->fd, buffer, bfsize, n, &dst->sa, m);
 }
 

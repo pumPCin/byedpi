@@ -49,7 +49,6 @@ int setttl(int fd, int ttl)
     return 0;
 }
 
-
 #ifdef __linux__
 static int get_family(const struct sockaddr_in6 *dst)
 {
@@ -108,11 +107,9 @@ static void wait_send_if_support(int sfd)
             break;
         }
         if (tcpi.tcpi_state != 1) {
-            LOG(LOG_E, "state: %d\n", tcpi.tcpi_state);
             break;
         }
         if (ts <= offsetof(struct tcp_info, tcpi_notsent_bytes)) {
-            LOG(LOG_E, "tcpi_notsent_bytes not provided\n");
             params.wait_send = 0;
             break;
         }
@@ -121,7 +118,6 @@ static void wait_send_if_support(int sfd)
         }
         delay(1);
     }
-    if (i) LOG(LOG_S, "waiting for send: %d ms\n", i);
 }
 #else
 #define wait_send_if_support(sfd)
@@ -266,7 +262,6 @@ static ssize_t send_fake(int sfd, const char *buffer,
         uniperror("GetTempFileName");
         return -1;
     }
-    LOG(LOG_L, "temp file: %s\n", path);
     
     HANDLE hfile = CreateFileA(path, GENERIC_READ | GENERIC_WRITE, 
         FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, CREATE_ALWAYS, 
@@ -454,13 +449,7 @@ static long gen_offset(long pos, int flag,
 static ssize_t tamp(char *buffer, size_t bfsize, ssize_t n, 
         const struct desync_params *dp, struct proto_info *info)
 {
-    if (dp->mod_http && is_http(buffer, n)) {
-        LOG(LOG_S, "modify HTTP: n=%zd\n", n);
-        if (mod_http(buffer, n, dp->mod_http)) {
-            LOG(LOG_E, "mod http error\n");
-        }
-    }
-    else if (dp->tlsrec_n && is_tls_chello(buffer, n)) {
+    if (dp->tlsrec_n && is_tls_chello(buffer, n)) {
         long lp = 0;
         struct part part;
         int i = 0, r = 0, rc = 0;
@@ -479,15 +468,12 @@ static ssize_t tamp(char *buffer, size_t bfsize, ssize_t n,
             }
             pos += (long )part.s * (part.r - r);
             if (pos < lp) {
-                LOG(LOG_E, "tlsrec cancel: %ld < %ld\n", pos, lp);
                 break;
             }
             if (!part_tls(buffer + lp, 
                     bfsize - lp, n - lp, pos - lp)) {
-                LOG(LOG_E, "tlsrec error: pos=%ld, n=%zd\n", pos, n);
                 break;
             }
-            LOG(LOG_S, "tlsrec: pos=%ld, n=%zd\n", pos, n);
             n += 5;
             lp = pos + 5;
         }
@@ -505,12 +491,8 @@ ssize_t desync(int sfd, char *buffer, size_t bfsize,
     if (offset == 0 && params.debug) {
         init_proto_info(buffer, n, &info);
         
-        if (info.host_pos) {
-            LOG(LOG_S, "host: %.*s (%d)\n",
-                info.host_len, buffer + info.host_pos, info.host_pos);
-        } else {
+        if (!info.host_pos) {
             INIT_HEX_STR(buffer, (n > 16 ? 16 : n));
-            LOG(LOG_S, "bytes: %s (%zd)\n", HEX_STR, n);
         }
     }
     n = tamp(buffer, bfsize, n, &dp, &info);
@@ -532,11 +514,9 @@ ssize_t desync(int sfd, char *buffer, size_t bfsize,
         pos += (long )part.s * (part.r - r);
         
         if (!(part.flag & OFFSET_START) && offset && pos <= offset) {
-            LOG(LOG_S, "offset: %zd, skip\n", offset);
             continue;
         }
         if (pos < 0 || pos > n || pos < lp) {
-            LOG(LOG_E, "split cancel: pos=%ld-%ld, n=%zd\n", lp, pos, n);
             break;
         }
         
@@ -572,7 +552,6 @@ ssize_t desync(int sfd, char *buffer, size_t bfsize,
             default:
                 return -1;
         }
-        LOG(LOG_S, "split: pos=%ld-%ld (%zd), m: %s\n", lp, pos, s, demode_str[part.m]);
         
         if (s < 0) {
             if (get_e() == EAGAIN) {
@@ -581,15 +560,13 @@ ssize_t desync(int sfd, char *buffer, size_t bfsize,
             return -1;
         } 
         else if (s != (pos - lp)) {
-            LOG(LOG_E, "%zd != %ld\n", s, pos - lp);
             return lp + s;
         }
         lp = pos;
     }
     // send all/rest
     if (lp < n) {
-        LOG((lp ? LOG_S : LOG_L), "send: pos=%ld-%zd\n", lp, n);
-        if (send(sfd, buffer + lp, n - lp, 0) < 0) {
+         if (send(sfd, buffer + lp, n - lp, 0) < 0) {
             if (get_e() == EAGAIN) {
                 return lp;
             }
