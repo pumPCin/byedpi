@@ -29,7 +29,7 @@ struct mphdr {
     struct elem *root;
 };
 
-struct mphdr *mem_pool(bool is_static, unsigned char cmp_type);
+struct mphdr *mem_pool(bool is_static);
 
 struct elem *mem_get(const struct mphdr *hdr, const char *str, int len);
 
