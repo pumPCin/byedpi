@@ -299,9 +299,6 @@ struct mphdr *parse_hosts(char *buffer, size_t size)
     
     for (; e <= end; e++) {
         if (e != end && *e != ' ' && *e != '\n' && *e != '\r') {
-            if (lower_char(e)) {
-                LOG(LOG_E, "invalid host: num: %zd (%.*s)\n", num + 1, (int )(e - s + 1), s);
-            }
             continue;
         }
         if (s == e) {
