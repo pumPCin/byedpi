@@ -23,7 +23,7 @@
     #define close(fd) closesocket(fd)
 #endif
 
-#define VERSION "13"
+#define VERSION "15"
 
 char ip_option[1] = "\0";
 
@@ -54,13 +54,17 @@ struct params params = {
     .laddr = {
         .sin6_family = AF_INET
     },
-    .debug = 0
+    .debug = 0,
+    .auto_level = AUTO_NOBUFF
 };
 
 
 const char help_text[] = {
     "    -i, --ip, <ip>            Listening IP, default 0.0.0.0\n"
     "    -p, --port <num>          Listening port, default 1080\n"
+    #ifdef __linux__
+    "    -E, --transparent         Transparent proxy mode\n"
+    #endif
     "    -c, --max-conn <count>    Connection count limit, default 512\n"
     "    -N, --no-domain           Deny domain resolving\n"
     "    -U, --no-udp              Deny UDP association\n"
@@ -74,6 +78,7 @@ const char help_text[] = {
     #endif
     "    -A, --auto <t,r,s,n>      Try desync params after this option\n"
     "                              Detect: torst,redirect,ssl_err,none\n"
+    "    -L, --auto-mode <0|1>     1 - handle trigger after several packets\n"
     "    -u, --cache-ttl <sec>     Lifetime of cached desync params for IP\n"
     #ifdef TIMEOUT_SUPPORT
     "    -T, --timeout <sec>       Timeout waiting for response, after which trigger auto\n"
@@ -81,14 +86,15 @@ const char help_text[] = {
     "    -K, --proto <t,h,u>       Protocol whitelist: tls,http,udp\n"
     "    -H, --hosts <file|:str>   Hosts whitelist, filename or :string\n"
     "    -V, --pf <port[-portr]>   Ports range whitelist\n"
-    "    -s, --split <n[+s]>       Split packet at n\n"
-    "                              +s - add SNI offset\n"
-    "                              +h - add HTTP Host offset\n"
-    "    -d, --disorder <n[+s]>    Split and send reverse order\n"
-    "    -o, --oob <n[+s]>         Split and send as OOB data\n"
-    "    -q, --disoob <n[+s]>      Split and send reverse order as OOB data\n"
+    "    -R, --round <num[-numr]>  Number of request to which desync will be applied\n"
+    "    -s, --split <pos_t>       Position format: offset[:repeats:skip][+flag1[flag2]]\n"
+    "                              Flags: +s - SNI offset, +h - HTTP host offset, +n - null\n"
+    "                              Additional flags: +e - end, +m - middle\n"
+    "    -d, --disorder <pos_t>    Split and send reverse order\n"
+    "    -o, --oob <pos_t>         Split and send as OOB data\n"
+    "    -q, --disoob <pos_t>      Split and send reverse order as OOB data\n"
     #ifdef FAKE_SUPPORT
-    "    -f, --fake <n[+s]>        Split and send fake packet\n"
+    "    -f, --fake <pos_t>        Split and send fake packet\n"
     "    -t, --ttl <num>           TTL of fake packets, default 8\n"
     #ifdef __linux__
     "    -k, --ip-opt[=f|:str]     IP options of fake packets\n"
@@ -100,7 +106,7 @@ const char help_text[] = {
     #endif
     "    -e, --oob-data <char>     Set custom OOB data\n"
     "    -M, --mod-http <h,d,r>    Modify HTTP: hcsmix,dcsmix,rmspace\n"
-    "    -r, --tlsrec <n[+s]>      Make TLS record at position\n"
+    "    -r, --tlsrec <pos_t>      Make TLS record at position\n"
     "    -a, --udp-fake <count>    UDP fakes count, default 0\n"
     #ifdef __linux__
     "    -Y, --drop-sack           Drop packets with SACK extension\n"
@@ -116,6 +122,9 @@ const struct option options[] = {
     {"version",       0, 0, 'v'},
     {"ip",            1, 0, 'i'},
     {"port",          1, 0, 'p'},
+    #ifdef __linux__
+    {"transparent",   0, 0, 'E'},
+    #endif
     {"conn-ip",       1, 0, 'I'},
     {"buf-size",      1, 0, 'b'},
     {"max-conn",      1, 0, 'c'},
@@ -125,6 +134,7 @@ const struct option options[] = {
     {"tfo ",          0, 0, 'F'},
     #endif
     {"auto",          1, 0, 'A'},
+    {"auto-mode",     1, 0, 'L'},
     {"cache-ttl",     1, 0, 'u'},
     #ifdef TIMEOUT_SUPPORT
     {"timeout",       1, 0, 'T'},
@@ -132,6 +142,7 @@ const struct option options[] = {
     {"proto",         1, 0, 'K'},
     {"hosts",         1, 0, 'H'},
     {"pf",            1, 0, 'V'},
+    {"round",         1, 0, 'R'},
     {"split",         1, 0, 's'},
     {"disorder",      1, 0, 'd'},
     {"oob",           1, 0, 'o'},
@@ -352,25 +363,63 @@ int get_default_ttl()
 }
 
 
+bool ipv6_support()
+{
+    int fd = socket(AF_INET6, SOCK_STREAM, 0);
+    if (fd < 0) {
+        return 0;
+    }
+    close(fd);
+    return 1;
+}
+
+
 int parse_offset(struct part *part, const char *str)
 {
     char *end = 0;
     long val = strtol(str, &end, 0);
-    if (*end == '+') switch (*(end + 1)) {
-        case 's': 
-            part->flag = OFFSET_SNI;
-            break;
-        case 'h': 
-            part->flag = OFFSET_HOST;
-            break;
-        case 'e':
-            part->flag = OFFSET_END;
-            break;
-        default:
+    
+    while (*end == ':') {
+        long rs = strtol(end + 1, &end, 0);
+        if (rs < 0 || rs > INT_MAX) {
             return -1;
+        }
+        if (!part->r) {
+            if (!rs) 
+                return -1;
+            part->r = rs;
+        }
+        else {
+            part->s = rs;
+            break;
+        }
     }
-    else if (*end) {
-        return -1;
+    if (*end == '+') {
+        switch (*(end + 1)) {
+            case 's':
+                part->flag = OFFSET_SNI;
+                break;
+            case 'h': 
+                part->flag = OFFSET_HOST;
+                break;
+            case 'n':
+                break;
+            default:
+                return -1;
+        }
+        switch (*(end + 2)) {
+            case 'e':
+                part->flag |= OFFSET_END;
+                break;
+            case 'm':
+                part->flag |= OFFSET_MID;
+                break;
+            case 'r': //
+                part->flag |= OFFSET_RAND;
+                break;
+            case 's': //
+                part->flag |= OFFSET_START;
+        }
     }
     part->pos = val;
     return 0;
@@ -464,12 +513,16 @@ int main(int argc, char **argv)
     }
 
     params.laddr.sin6_port = htons(1080);
+    if (!ipv6_support()) {
+        params.baddr.sin6_family = AF_INET;
+    }
     
     int rez;
     int invalid = 0;
     
     long val = 0;
     char *end = 0;
+    bool all_limited = 1;
     
     struct desync_params *dp = add((void *)&params.dp,
         &params.dp_count, sizeof(struct desync_params));
@@ -492,6 +545,11 @@ int main(int argc, char **argv)
         case 'U':
             params.udp = 0;
             break;
+        #ifdef __linux__
+        case 'E':
+            params.transparent = 1;
+            break;
+        #endif
             
         case 'h':
             printf(help_text);
@@ -550,7 +608,18 @@ int main(int argc, char **argv)
             params.tfo = 1;
             break;
             
+        case 'L':
+            val = strtol(optarg, &end, 0);
+            if (val < 0 || val > 1 || *end)
+                invalid = 1;
+            else
+                params.auto_level = val;
+            break;
+            
         case 'A':
+            if (!(dp->hosts || dp->proto || dp->pf[0] || dp->detect)) {
+                all_limited = 0;
+            }
             dp = add((void *)&params.dp, &params.dp_count,
                 sizeof(struct desync_params));
             if (!dp) {
@@ -578,6 +647,9 @@ int main(int argc, char **argv)
                 }
                 end = strchr(end, ',');
                 if (end) end++;
+            }
+            if (dp->detect && params.auto_level == AUTO_NOBUFF) {
+                params.auto_level = AUTO_NOSAVE;
             }
             break;
             
@@ -797,6 +869,24 @@ int main(int argc, char **argv)
             }
             break;
             
+        case 'R':
+            val = strtol(optarg, &end, 0);
+            if (val <= 0 || val > INT_MAX)
+                invalid = 1;
+            else {
+                dp->rounds[0] = val;
+                if (*end == '-') {
+                    val = strtol(end + 1, &end, 0);
+                    if (val <= 0 || val > INT_MAX)
+                        invalid = 1;
+                }
+                if (*end)
+                    invalid = 1;
+                else
+                    dp->rounds[1] = val;
+            }
+            break;
+            
         case 'g':
             val = strtol(optarg, &end, 0);
             if (val <= 0 || val > 255 || *end)
@@ -844,7 +934,7 @@ int main(int argc, char **argv)
         clear_params();
         return -1;
     }
-    if (dp->hosts || dp->proto || dp->pf[0]) {
+    if (all_limited) {
         dp = add((void *)&params.dp,
             &params.dp_count, sizeof(struct desync_params));
         if (!dp) {
@@ -868,6 +958,8 @@ int main(int argc, char **argv)
         clear_params();
         return -1;
     }
+    srand((unsigned int)time(0));
+    
     int status = run((struct sockaddr_ina *)&params.laddr);
     clear_params();
     return status;
