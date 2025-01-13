@@ -17,6 +17,8 @@
     #include <netinet/in.h>
     #include <netinet/tcp.h>
     #include <sys/socket.h>
+    
+    #define DAEMON
 #else
     #include <ws2tcpip.h>
     #include "win_service.h"
@@ -52,19 +54,23 @@ struct params params = {
     .max_open = 512,
     .bfsize = 16384,
     .baddr = {
-        .sin6_family = AF_INET6
+        .in6 = { .sin6_family = AF_INET6 }
     },
     .laddr = {
-        .sin6_family = AF_INET
+        .in = { .sin_family = AF_INET }
     },
     .debug = 0,
     .auto_level = AUTO_NOBUFF
 };
 
 
-const static char help_text[] = {
+static const char help_text[] = {
     "    -i, --ip, <ip>            Listening IP, default 0.0.0.0\n"
     "    -p, --port <num>          Listening port, default 1080\n"
+    #ifdef DAEMON
+    "    -D, --daemon              Daemonize\n"
+    "    -w, --pidfile <filename>  Write PID to file\n"
+    #endif
     #ifdef __linux__
     "    -E, --transparent         Transparent proxy mode\n"
     #endif
@@ -119,6 +125,10 @@ const static char help_text[] = {
 
 
 const struct option options[] = {
+    #ifdef DAEMON
+    {"daemon",        0, 0, 'D'},
+    {"pidfile",       1, 0, 'w'},
+    #endif
     {"no-domain",     0, 0, 'N'},
     {"no-ipv6",       0, 0, 'X'},
     {"no-udp",        0, 0, 'U'},
@@ -177,15 +187,15 @@ const struct option options[] = {
 };
     
 
-size_t parse_cform(char *buffer, size_t blen, 
+ssize_t parse_cform(char *buffer, size_t blen, 
         const char *str, size_t slen)
 {
     static char esca[] = {
         'r','\r','n','\n','t','\t','\\','\\',
         'f','\f','b','\b','v','\v','a','\a', 0
     };
-    ssize_t i = 0, p = 0;
-    for (; p < slen && i < blen; ++p && ++i) {
+    size_t i = 0, p = 0;
+    for (; p < slen && i < blen; ++p, ++i) {
         if (str[p] != '\\') {
             buffer[i] = str[p];
             continue;
@@ -202,8 +212,8 @@ size_t parse_cform(char *buffer, size_t blen,
             continue;
         }
         int n = 0;
-        if (sscanf(&str[p], "x%2hhx%n", &buffer[i], &n) == 1
-              || sscanf(&str[p], "%3hho%n", &buffer[i], &n) == 1) {
+        if (sscanf(&str[p], "x%2hhx%n", (uint8_t *)&buffer[i], &n) == 1
+              || sscanf(&str[p], "%3hho%n", (uint8_t *)&buffer[i], &n) == 1) {
             p += (n - 1);
             continue;
         }
@@ -223,7 +233,7 @@ char *data_from_str(const char *str, ssize_t *size)
     if (!d) {
         return 0;
     }
-    size_t i = parse_cform(d, len, str, len);
+    ssize_t i = parse_cform(d, len, str, len);
     
     char *m = len != i ? realloc(d, i) : 0;
     if (i == 0) {
@@ -260,7 +270,8 @@ char *ftob(const char *str, ssize_t *sl)
         if (!(buffer = malloc(size))) {
             break;
         }
-        if (fread(buffer, 1, size, file) != size) {
+        size_t rs = fread(buffer, 1, size, file);
+        if (rs != (size_t )size) {
             free(buffer);
             buffer = 0;
         }
@@ -320,11 +331,13 @@ struct mphdr *parse_hosts(char *buffer, size_t size)
             }
         } 
         else {
+            LOG(LOG_E, "invalid host: num: %zd \"%.*s\"\n", num + 1, ((int )(e - s)), s);
             drop = 0;
         }
         num++;
         s = e + 1;
     }
+    LOG(LOG_S, "hosts count: %zd\n", hdr->count);
     return hdr;
 }
 
@@ -381,6 +394,7 @@ struct mphdr *parse_ipset(char *buffer, size_t size)
         char ip_stack[sizeof(struct in6_addr)];
         int bits = parse_ip(ip_stack, ip, sizeof(ip));
         if (bits <= 0) {
+            LOG(LOG_E, "invalid ip: num: %zd\n", num);
             continue;
         }
         int len = bits / 8 + (bits % 8 ? 1 : 0);
@@ -394,11 +408,12 @@ struct mphdr *parse_ipset(char *buffer, size_t size)
             return 0;
         }
     }
+    LOG(LOG_S, "ip count: %zd\n", hdr->count);
     return hdr;
 }
 
 
-int get_addr(const char *str, struct sockaddr_ina *addr)
+int get_addr(const char *str, union sockaddr_u *addr)
 {
     struct addrinfo hints = {0}, *res = 0;
     
@@ -424,7 +439,7 @@ int get_addr(const char *str, struct sockaddr_ina *addr)
 }
 
 
-int get_default_ttl()
+int get_default_ttl(void)
 {
     int orig_ttl = -1, fd;
     socklen_t tsize = sizeof(orig_ttl);
@@ -442,7 +457,7 @@ int get_default_ttl()
 }
 
 
-bool ipv6_support()
+bool ipv6_support(void)
 {
     int fd = socket(AF_INET6, SOCK_STREAM, 0);
     if (fd < 0) {
@@ -520,10 +535,39 @@ void *add(void **root, int *n, size_t ss)
 }
 
 
+#ifdef DAEMON
+int init_pid_file(const char *fname)
+{
+    params.pid_fd = open(fname, O_RDWR | O_CREAT, 0640);
+    if (params.pid_fd < 0) {
+        return -1;
+    }
+    if (lockf(params.pid_fd, F_TLOCK, 0) < 0) {
+        return -1;
+    }
+    params.pid_file = fname;
+    char pid_str[21];
+    snprintf(pid_str, sizeof(pid_str), "%d", getpid());
+    
+    write(params.pid_fd, pid_str, strlen(pid_str));
+    return 0;
+}
+#endif
+
+
 void clear_params(void)
 {
     #ifdef _WIN32
     WSACleanup();
+    #endif
+    #ifdef DAEMON
+    if (params.pid_fd > 0) {
+        lockf(params.pid_fd, F_ULOCK, 0);
+        close(params.pid_fd);
+    }
+    if (params.pid_file) {
+        unlink(params.pid_file);
+    }
     #endif
     if (params.mempool) {
         mem_destroy(params.mempool);
@@ -594,11 +638,14 @@ int main(int argc, char **argv)
             opt[o] = ':';
         }
     }
-
-    params.laddr.sin6_port = htons(1080);
+    //
+    params.laddr.in.sin_port = htons(1080);
     if (!ipv6_support()) {
-        params.baddr.sin6_family = AF_INET;
+        params.baddr.sa.sa_family = AF_INET;
     }
+    
+    char *pid_file = 0;
+    bool daemonize = 0;
     
     int rez;
     int invalid = 0;
@@ -633,7 +680,16 @@ int main(int argc, char **argv)
             params.transparent = 1;
             break;
         #endif
+        
+        #ifdef DAEMON
+        case 'D':
+            daemonize = 1;
+            break;
             
+        case 'w':
+            pid_file = optarg;
+            break;
+        #endif
         case 'h':
             printf(help_text);
             clear_params();
@@ -644,8 +700,7 @@ int main(int argc, char **argv)
             return 0;
         
         case 'i':
-            if (get_addr(optarg, 
-                    (struct sockaddr_ina *)&params.laddr) < 0)
+            if (get_addr(optarg, &params.laddr) < 0)
                 invalid = 1;
             break;
             
@@ -654,12 +709,11 @@ int main(int argc, char **argv)
             if (val <= 0 || val > 0xffff || *end)
                 invalid = 1;
             else
-                params.laddr.sin6_port = htons(val);
+                params.laddr.in.sin_port = htons(val);
             break;
             
         case 'I':
-            if (get_addr(optarg, 
-                    (struct sockaddr_ina *)&params.baddr) < 0)
+            if (get_addr(optarg, &params.baddr) < 0)
                 invalid = 1;
             break;
             
@@ -1041,7 +1095,7 @@ int main(int argc, char **argv)
         }
     }
     
-    if (params.baddr.sin6_family != AF_INET6) {
+    if (params.baddr.sa.sa_family != AF_INET6) {
         params.ipv6 = 0;
     }
     if (!params.def_ttl) {
@@ -1058,7 +1112,17 @@ int main(int argc, char **argv)
     }
     srand((unsigned int)time(0));
     
-    int status = run((struct sockaddr_ina *)&params.laddr);
+    #ifdef DAEMON
+    if (daemonize && daemon(0, 0) < 0) {
+        clear_params();
+        return -1;
+    }
+    if (pid_file && init_pid_file(pid_file) < 0) {
+        clear_params();
+        return -1;
+    }
+    #endif
+    int status = run(&params.laddr);
     clear_params();
     return status;
 }
