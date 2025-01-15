@@ -132,6 +132,7 @@ const struct option options[] = {
     {"no-domain",     0, 0, 'N'},
     {"no-ipv6",       0, 0, 'X'},
     {"no-udp",        0, 0, 'U'},
+    {"http-connect",  0, 0, 'G'},
     {"help",          0, 0, 'h'},
     {"version",       0, 0, 'v'},
     {"ip",            1, 0, 'i'},
@@ -671,6 +672,9 @@ int main(int argc, char **argv)
         case 'U':
             params.udp = 0;
             break;
+        case 'G':
+            params.http_connect = 1;
+            break;
         #ifdef __linux__
         case 'E':
             params.transparent = 1;
@@ -801,7 +805,7 @@ int main(int argc, char **argv)
             #else
             val = strtol(optarg, &end, 0);
             #endif
-            if (val <= 0 || val > UINT_MAX || *end)
+            if (val <= 0 || val > (long)UINT_MAX || *end)
                 invalid = 1;
             else
                 params.timeout = val;
