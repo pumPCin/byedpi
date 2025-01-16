@@ -32,6 +32,12 @@
     #define POLLRDHUP 0
 #endif
 
+union sockaddr_u {
+    struct sockaddr sa;
+    struct sockaddr_in in;
+    struct sockaddr_in6 in6;
+};
+
 enum eid {
     EV_ACCEPT,
     EV_REQUEST,
@@ -45,6 +51,7 @@ enum eid {
 #define FLAG_S4 1
 #define FLAG_S5 2
 #define FLAG_CONN 4
+#define FLAG_HTTP 8
 
 #ifdef EID_STR
 char *eid_name[] = {
@@ -72,10 +79,7 @@ struct eval {
     struct eval *pair;
     struct buffer buff;
     int flag;
-    union {
-        struct sockaddr_in in;
-        struct sockaddr_in6 in6;
-    };
+    union sockaddr_u addr;
     ssize_t recv_count;
     ssize_t round_sent;
     unsigned int round_count;

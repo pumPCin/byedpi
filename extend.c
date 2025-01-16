@@ -23,7 +23,7 @@
 #include "desync.h"
 #include "packets.h"
 
-#define KEY_SIZE sizeof(struct sockaddr_ina)
+#define KEY_SIZE sizeof(union sockaddr_u)
 
 
 static int set_timeout(int fd, unsigned int s)
@@ -47,7 +47,7 @@ static int set_timeout(int fd, unsigned int s)
 }
 
 
-static ssize_t serialize_addr(const struct sockaddr_ina *dst,
+static ssize_t serialize_addr(const union sockaddr_u *dst,
         uint8_t *const out, const size_t out_len)
 {
     #define serialize(raw, field, len, counter){ \
@@ -72,12 +72,12 @@ static ssize_t serialize_addr(const struct sockaddr_ina *dst,
 }
 
 
-static int cache_get(struct sockaddr_ina *dst)
+static int cache_get(const union sockaddr_u *dst)
 {
     uint8_t key[KEY_SIZE] = { 0 };
     int len = serialize_addr(dst, key, sizeof(key));
     
-    struct elem *val = mem_get(params.mempool, (char *)key, len);
+    struct elem_i *val = (struct elem_i *)mem_get(params.mempool, (char *)key, len);
     if (!val) {
         return -1;
     }
@@ -89,7 +89,7 @@ static int cache_get(struct sockaddr_ina *dst)
 }
 
 
-static int cache_add(struct sockaddr_ina *dst, int m)
+static int cache_add(const union sockaddr_u *dst, int m)
 {
     assert(m >= 0 && m < params.dp_count);
     
@@ -102,10 +102,17 @@ static int cache_add(struct sockaddr_ina *dst, int m)
         return 0;
     }
     time_t t = time(0);
-
-    struct elem *val = mem_add(params.mempool, (char *)key, len);
+    
+    char *key_d = malloc(len);
+    if (!key_d) {
+        return -1;
+    }
+    memcpy(key_d, key, len);
+    
+    struct elem_i *val = (struct elem_i *)mem_add(params.mempool, key_d, len, sizeof(struct elem_i));
     if (!val) {
         uniperror("mem_add");
+        free(key_d);
         return -1;
     }
     val->m = m;
@@ -113,14 +120,9 @@ static int cache_add(struct sockaddr_ina *dst, int m)
     return 0;
 }
 
-static inline bool check_port(uint16_t *p, struct sockaddr_in6 *dst)
-{
-    return (dst->sin6_port >= p[0] 
-            && dst->sin6_port <= p[1]);
-}
 
 int connect_hook(struct poolhd *pool, struct eval *val, 
-        struct sockaddr_ina *dst, int next)
+        const union sockaddr_u *dst, int next)
 {
     int m = cache_get(dst);
     val->cache = (m == 0);
@@ -130,7 +132,7 @@ int connect_hook(struct poolhd *pool, struct eval *val,
 }
 
 
-int socket_mod(int fd, struct sockaddr *dst)
+int socket_mod(int fd)
 {
     if (params.custom_ttl) {
         if (setttl(fd, params.def_ttl) < 0) {
@@ -150,8 +152,7 @@ static int reconnect(struct poolhd *pool, struct eval *val, int m)
     
     struct eval *client = val->pair;
     
-    if (create_conn(pool, client, 
-            (struct sockaddr_ina *)&val->in6, EV_FIRST_TUNNEL)) {
+    if (create_conn(pool, client, &val->addr, EV_FIRST_TUNNEL)) {
         return -1;
     }
     val->pair = 0;
@@ -166,7 +167,8 @@ static int reconnect(struct poolhd *pool, struct eval *val, int m)
 }
 
 
-static bool check_host(struct mphdr *hosts, char *buffer, ssize_t n)
+static bool check_host(
+        struct mphdr *hosts, const char *buffer, ssize_t n)
 {
     char *host = 0;
     int len;
@@ -177,22 +179,31 @@ static bool check_host(struct mphdr *hosts, char *buffer, ssize_t n)
     if (len <= 0) {
         return 0;
     }
-    char *e = host + len;
-    for (; host < e; host++) {
-        if (mem_get(hosts, host, e - host)) {
-            return 1;
-        }
-        if (!(host = memchr(host, '.', e - host))) {
-            return 0;
-        }
+    struct elem *v = mem_get(hosts, host, len);
+    return v && v->len <= len;
+}
+
+
+static bool check_ip(
+        struct mphdr *ipset, const union sockaddr_u *dst)
+{
+    int len = sizeof(dst->in.sin_addr);
+    char *data = (char *)&dst->in.sin_addr;
+    
+    if (dst->sa.sa_family == AF_INET6) {
+        len = sizeof(dst->in6.sin6_addr);
+        data = (char *)&dst->in6.sin6_addr;
+    }
+    if (mem_get(ipset, data, len * 8)) {
+        return 1;
     }
     return 0;
 }
 
 
-static bool check_proto_tcp(int proto, char *buffer, ssize_t n)
+static bool check_proto_tcp(int proto, const char *buffer, ssize_t n)
 {
-    if (proto & IS_TCP) {
+    if (!(proto & ~IS_IPV4)) {
         return 1;
     }
     else if ((proto & IS_HTTP) && 
@@ -207,7 +218,31 @@ static bool check_proto_tcp(int proto, char *buffer, ssize_t n)
 }
 
 
-static bool check_round(int *nr, int r)
+static bool check_l34(struct desync_params *dp, int st, const union sockaddr_u *dst)
+{
+    if ((dp->proto & IS_UDP) && (st != SOCK_DGRAM)) {
+        return 0;
+    }
+    if (dp->proto & IS_IPV4) {
+        static const char *pat = "\0\0\0\0\0\0\0\0\0\0\xff\xff";
+        
+        if (dst->sa.sa_family != AF_INET 
+                && memcmp(&dst->in6.sin6_addr, pat, 12)) {
+            return 0;
+        }
+    }
+    if (dp->pf[0] && 
+            (dst->in.sin_port < dp->pf[0] || dst->in.sin_port > dp->pf[1])) {
+        return 0;
+    }
+    if (dp->ipset && !check_ip(dp->ipset, dst)) {
+        return 0;
+    }
+    return 1;
+}
+
+
+static bool check_round(const int *nr, int r)
 {
     return (!nr[1] && r <= 1) || (r >= nr[0] && r <= nr[1]);
 }
@@ -235,13 +270,11 @@ static int on_trigger(int type, struct poolhd *pool, struct eval *val)
         if (can_reconn) {
             return reconnect(pool, val, m);
         }
-        cache_add(
-            (struct sockaddr_ina *)&val->in6, m);
+        cache_add(&val->addr, m);
         break;
     }
     if (m >= params.dp_count && m > 1) {
-        cache_add(
-            (struct sockaddr_ina *)&val->in6, 0);
+        cache_add(&val->addr, 0);
     }
     return -1;
 }
@@ -274,7 +307,7 @@ static int on_fin(struct poolhd *pool, struct eval *val)
 
 
 static int on_response(struct poolhd *pool, struct eval *val, 
-        char *resp, ssize_t sn)
+        const char *resp, ssize_t sn)
 {
     int m = val->pair->attempt + 1;
     
@@ -313,16 +346,16 @@ static inline void free_first_req(struct eval *client)
 }
 
 
-static int setup_conn(struct eval *client, char *buffer, ssize_t n)
+static int setup_conn(struct eval *client, const char *buffer, ssize_t n)
 {
     int m = client->attempt;
     
     if (!m) for (; m < params.dp_count; m++) {
         struct desync_params *dp = &params.dp[m];
-        if (!dp->detect &&
-                (!dp->pf[0] || check_port(dp->pf, &client->pair->in6)) &&
-                (!dp->proto || check_proto_tcp(dp->proto, buffer, n)) &&
-                (!dp->hosts || check_host(dp->hosts, buffer, n))) {
+        if (!dp->detect 
+                && check_l34(dp, SOCK_STREAM, &client->pair->addr)
+                && check_proto_tcp(dp->proto, buffer, n) 
+                && (!dp->hosts || check_host(dp->hosts, buffer, n))) {
             break;
         }
     }
@@ -355,7 +388,7 @@ static int cancel_setup(struct eval *remote)
 }
 
 
-int send_saved_req(struct poolhd *pool,
+static int send_saved_req(struct poolhd *pool,
         struct eval *client, char *buffer, ssize_t bfsize)
 {
     ssize_t offset = client->buff.offset;
@@ -380,7 +413,7 @@ int send_saved_req(struct poolhd *pool,
 
 
 int on_first_tunnel(struct poolhd *pool,
-        struct eval *val, char *buffer, ssize_t bfsize, int etype)
+        struct eval *val, char *buffer, size_t bfsize, int etype)
 {
     if ((etype & POLLOUT) && val->flag == FLAG_CONN) {
         if (mod_etype(pool, val, POLLIN) ||
@@ -388,6 +421,7 @@ int on_first_tunnel(struct poolhd *pool,
             uniperror("mod_etype");
             return -1;
         }
+        val->pair->type = EV_FIRST_TUNNEL;
         return send_saved_req(pool, val->pair, buffer, bfsize);
     }
     ssize_t n = tcp_recv_hook(pool, val, buffer, bfsize);
@@ -418,8 +452,7 @@ int on_first_tunnel(struct poolhd *pool,
         free_first_req(val->pair);
         int m = val->pair->attempt;
         
-        if (val->pair->cache && 
-                cache_add((struct sockaddr_ina *)&val->in6, m) < 0) {
+        if (val->pair->cache && cache_add(&val->addr, m) < 0) {
             return -1;
         }
     }
@@ -451,8 +484,8 @@ ssize_t tcp_send_hook(struct eval *remote,
             ssize_t offset = remote->pair->round_sent;
             if (!offset && remote->round_count) offset = -1;
             
-            sn = desync(remote->fd, buffer, bfsize, n,
-                offset, (struct sockaddr *)&remote->in6, m);
+            sn = desync(remote->fd, 
+                buffer, bfsize, n, offset, m);
         }
     }
     if (skip) {
@@ -466,8 +499,8 @@ ssize_t tcp_send_hook(struct eval *remote,
 }
 
 
-ssize_t tcp_recv_hook(struct poolhd *pool, struct eval *val,
-        char *buffer, size_t bfsize)
+ssize_t tcp_recv_hook(struct poolhd *pool, 
+        struct eval *val, char *buffer, size_t bfsize)
 {
     ssize_t n = recv(val->fd, buffer, bfsize, 0);
     if (n < 1) {
@@ -511,7 +544,7 @@ ssize_t tcp_recv_hook(struct poolhd *pool, struct eval *val,
 
 
 ssize_t udp_hook(struct eval *val, 
-        char *buffer, size_t bfsize, ssize_t n, struct sockaddr_ina *dst)
+        char *buffer, ssize_t n, const union sockaddr_u *dst)
 {
     struct eval *pair = val->pair->pair;
     
@@ -519,9 +552,8 @@ ssize_t udp_hook(struct eval *val,
     if (!m) {
         for (; m < params.dp_count; m++) {
             struct desync_params *dp = &params.dp[m];
-            if (!dp->detect && 
-                    (!dp->proto || (dp->proto & IS_UDP)) &&
-                    (!dp->pf[0] || check_port(dp->pf, &dst->in6))) {
+            if (!dp->detect 
+                    && check_l34(dp, SOCK_DGRAM, dst)) {
                 break;
             }
         }
@@ -533,12 +565,12 @@ ssize_t udp_hook(struct eval *val,
     if (!check_round(params.dp[m].rounds, r)) {
         return send(val->fd, buffer, n, 0);
     }
-    return desync_udp(val->fd, buffer, bfsize, n, &dst->sa, m);
+    return desync_udp(val->fd, buffer, n, &dst->sa, m);
 }
 
 
 #ifdef __linux__
-int protect(int conn_fd, const char *path)
+static int protect(int conn_fd, const char *path)
 {
     struct sockaddr_un sa;
     sa.sun_family = AF_UNIX;
@@ -559,7 +591,7 @@ int protect(int conn_fd, const char *path)
         close(fd);
         return -1;
     }
-    char buf[CMSG_SPACE(sizeof(fd))] = {};
+    char buf[CMSG_SPACE(sizeof(fd))] = { 0 };
     struct iovec io = { .iov_base = "1", .iov_len = 1 };
     struct msghdr msg = { .msg_iov = &io };
     
