@@ -17,10 +17,7 @@
     #include <netinet/in.h>
     #include <netinet/tcp.h>
     #include <sys/socket.h>
-
-    #ifndef F_TLOCK
-    #define lockf(x, y, z) 0
-    #endif
+    
     #define DAEMON
 #else
     #include <ws2tcpip.h>
@@ -542,9 +539,13 @@ int init_pid_file(const char *fname)
     if (params.pid_fd < 0) {
         return -1;
     }
-    //if (lockf(params.pid_fd, F_TLOCK, 0) < 0) {
-        //return -1;
-    //}
+    struct flock fl = { 
+        .l_whence = SEEK_CUR,
+        .l_type = F_WRLCK
+    };
+    if (fcntl(params.pid_fd, F_SETLK, &fl) < 0) {
+        return -1;
+    }
     params.pid_file = fname;
     char pid_str[21];
     snprintf(pid_str, sizeof(pid_str), "%d", getpid());
@@ -562,7 +563,6 @@ void clear_params(void)
     #endif
     #ifdef DAEMON
     if (params.pid_fd > 0) {
-        //lockf(params.pid_fd, F_ULOCK, 0);
         close(params.pid_fd);
     }
     if (params.pid_file) {
