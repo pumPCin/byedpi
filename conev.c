@@ -48,6 +48,7 @@ struct eval *add_event(struct poolhd *pool, enum eid type,
 {
     assert(fd > 0);
     if (pool->count >= pool->max) {
+        LOG(LOG_E, "add_event: pool is full\n");
         return 0;
     }
     struct eval *val = pool->links[pool->count];
