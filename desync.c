@@ -31,8 +31,8 @@
 #include "packets.h"
 #include "error.h"
 
-#define WAIT_LIMIT_MS 500
 #define DEFAULT_TTL 8
+#define ERR_WAIT -12
 
 
 int setttl(int fd, int ttl)
@@ -86,44 +86,27 @@ static int drop_sack(int fd)
 }
 
 
-static inline void delay(long ms)
+static bool sock_has_notsent(int sfd)
 {
-    struct timespec time = { 
-         .tv_nsec = ms * 1e6
-    };
-    nanosleep(&time, 0);
-}
-
-
-static void wait_send_if_support(int sfd)
-{
-    int i = 0;
-    for (; params.wait_send && i < WAIT_LIMIT_MS; i++) {
-        struct tcp_info tcpi;
-        socklen_t ts = sizeof(tcpi);
-        
-        if (getsockopt(sfd, IPPROTO_TCP,
-                TCP_INFO, (char *)&tcpi, &ts) < 0) {
-            perror("getsockopt TCP_INFO");
-            break;
-        }
-        if (tcpi.tcpi_state != 1) {
-            break;
-        }
-        if (ts <= offsetof(struct tcp_info, tcpi_notsent_bytes)) {
-            params.wait_send = 0;
-            break;
-        }
-        if (tcpi.tcpi_notsent_bytes == 0) {
-            break;
-        }
-        delay(1);
+    struct tcp_info tcpi;
+    socklen_t ts = sizeof(tcpi);
+    
+    if (getsockopt(sfd, IPPROTO_TCP,
+            TCP_INFO, (char *)&tcpi, &ts) < 0) {
+        perror("getsockopt TCP_INFO");
+        return 0;
     }
+    if (tcpi.tcpi_state != 1) {
+        LOG(LOG_E, "state: %d\n", tcpi.tcpi_state);
+        return 0;
+    }
+    if (ts <= offsetof(struct tcp_info, tcpi_notsent_bytes)) {
+        LOG(LOG_E, "tcpi_notsent_bytes not provided\n");
+        return 0;
+    }
+    return tcpi.tcpi_notsent_bytes != 0;
 }
-#else
-#define wait_send_if_support(sfd) {}
 #endif
-
 
 static struct packet get_tcp_fake(const char *buffer, size_t n,
         struct proto_info *info, const struct desync_params *opt)
@@ -214,7 +197,6 @@ static ssize_t send_fake(int sfd, const char *buffer,
             uniperror("splice");
             break;
         }
-        wait_send_if_support(sfd);
         memcpy(p, buffer, pos);
         
         if (setttl(sfd, params.def_ttl) < 0) {
@@ -248,6 +230,7 @@ static ssize_t send_fake(int sfd, const char *buffer,
 #endif
 
 #ifdef _WIN32
+#define sock_has_notsent(sfd) 0
 #define MAX_TF 2
 
 struct tf_s {
@@ -269,7 +252,7 @@ static struct tf_s *getTFE(void)
         for (int i = 0; i < MAX_TF; i++) {
             events[i] = tf_exems[i].ov.hEvent;
         }
-        DWORD ret = WaitForMultipleObjects(MAX_TF, events, FALSE, INFINITE);
+        DWORD ret = WaitForMultipleObjects(MAX_TF, events, FALSE, 0);
         
         if (ret >= WAIT_OBJECT_0 && ret < WAIT_OBJECT_0 + MAX_TF) {
             s = &tf_exems[ret - WAIT_OBJECT_0];
@@ -296,7 +279,7 @@ static HANDLE openTempFile(void)
     
     HANDLE hfile = CreateFileA(path, GENERIC_READ | GENERIC_WRITE, 
         FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, CREATE_ALWAYS, 
-        FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE, NULL);
+            FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE, NULL);
     if (hfile == INVALID_HANDLE_VALUE) {
         uniperror("CreateFileA");
         return 0;
@@ -310,7 +293,7 @@ static ssize_t send_fake(int sfd, const char *buffer,
 {
     struct tf_s *s = getTFE();
     if (!s) {
-        return -1;
+        return ERR_WAIT;
     }
     HANDLE hfile = openTempFile();
     if (!hfile) {
@@ -394,7 +377,6 @@ static ssize_t send_oob(int sfd, char *buffer,
         uniperror("send");
         return -1;
     }
-    wait_send_if_support(sfd);
     
     len--;
     if (len != pos) {
@@ -416,8 +398,6 @@ static ssize_t send_disorder(int sfd,
     if (len < 0) {
         uniperror("send");
     }
-    else wait_send_if_support(sfd);
-    
     if (setttl(sfd, params.def_ttl) < 0) {
         return -1;
     }
@@ -530,13 +510,18 @@ static ssize_t tamp(char *buffer, size_t bfsize, ssize_t n,
 }
 
 
-ssize_t desync(int sfd, char *buffer, size_t bfsize,
-        ssize_t n, ssize_t offset, int dp_c)
+ssize_t desync(struct poolhd *pool, 
+        struct eval *val, struct buffer *buff, ssize_t n)
 {
-    struct desync_params dp = params.dp[dp_c];
+    struct desync_params dp = params.dp[val->pair->attempt];
     struct proto_info info = { 0 };
     
-    if (offset == 0 && params.debug) {
+    int sfd = val->fd;
+    char *buffer = buff->data;
+    size_t bfsize = buff->size;
+    ssize_t offset = buff->offset;
+    
+    if (!val->recv_count && params.debug) {
         init_proto_info(buffer, n, &info);
         
         if (!info.host_pos) {
@@ -544,12 +529,8 @@ ssize_t desync(int sfd, char *buffer, size_t bfsize,
         }
     }
     n = tamp(buffer, bfsize, n, &dp, &info);
-    #ifdef __linux__
-    if (!offset && dp.drop_sack && drop_sack(sfd)) {
-        return -1;
-    }
-    #endif
-    long lp = 0;
+    
+    long lp = offset;
     struct part part;
     int i = 0, r = 0;
     
@@ -561,15 +542,18 @@ ssize_t desync(int sfd, char *buffer, size_t bfsize,
         long pos = gen_offset(part.pos, part.flag, buffer, n, lp, &info);
         pos += (long )part.s * (part.r - r);
         
-        if (!(part.flag & OFFSET_START) && offset && pos <= offset) {
+        if (offset && pos <= offset) {
             continue;
         }
         if (pos < 0 || pos > n || pos < lp) {
             break;
         }
-        
         ssize_t s = 0;
-        switch (part.m) {
+        
+        if (sock_has_notsent(sfd)) {
+            s = ERR_WAIT;
+        }
+        else switch (part.m) {
             #ifdef FAKE_SUPPORT
             case DESYNC_FAKE:
                 if (pos != lp) s = send_fake(sfd, 
@@ -593,22 +577,23 @@ ssize_t desync(int sfd, char *buffer, size_t bfsize,
                 
             case DESYNC_SPLIT:
             case DESYNC_NONE:
-                s = send(sfd, buffer + lp, pos - lp, 0);
-                wait_send_if_support(sfd);
-                break;
-                
             default:
-                return -1;
+                s = send(sfd, buffer + lp, pos - lp, 0);
+                break;
         }
         
+        if (s == ERR_WAIT) {
+            set_timer(pool, val, 10);
+            return lp - offset;
+        }
         if (s < 0) {
             if (get_e() == EAGAIN) {
-                return lp;
+                return lp - offset;
             }
             return -1;
         } 
         else if (s != (pos - lp)) {
-            return lp + s;
+            return lp + s - offset;
         }
         lp = pos;
     }
@@ -616,15 +601,27 @@ ssize_t desync(int sfd, char *buffer, size_t bfsize,
     if (lp < n) {
         if (send(sfd, buffer + lp, n - lp, 0) < 0) {
             if (get_e() == EAGAIN) {
-                return lp;
+                return lp - offset;
             }
             uniperror("send");
             return -1;
         }
     }
-    return n;
+    return n - offset;
 }
 
+
+int pre_desync(int sfd, int dp_c)
+{
+    struct desync_params *dp = &params.dp[dp_c];
+    
+    #ifdef __linux__
+    if (dp->drop_sack && drop_sack(sfd)) {
+        return -1;
+    }
+    #endif
+    return 0;
+}
 
 int post_desync(int sfd, int dp_c)
 {
