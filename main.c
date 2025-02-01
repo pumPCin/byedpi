@@ -332,7 +332,7 @@ struct mphdr *parse_hosts(char *buffer, size_t size)
             }
         } 
         else {
-             drop = 0;
+            drop = 0;
         }
         num++;
         s = e + 1;
