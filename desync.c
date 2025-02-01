@@ -105,6 +105,8 @@ static bool sock_has_notsent(int sfd)
     }
     return tcpi.tcpi_notsent_bytes != 0;
 }
+#else
+#define sock_has_notsent(sfd) 0
 #endif
 
 static struct packet get_tcp_fake(const char *buffer, size_t n,
@@ -229,7 +231,6 @@ static ssize_t send_fake(int sfd, const char *buffer,
 #endif
 
 #ifdef _WIN32
-#define sock_has_notsent(sfd) 0
 #define MAX_TF 2
 
 struct tf_s {
@@ -668,8 +669,7 @@ ssize_t desync_udp(int sfd, char *buffer,
             return -1;
         }
         for (int i = 0; i < dp->udp_fake_count; i++) {
-            ssize_t len = sendto(sfd, pkt.data, 
-                pkt.size, 0, dst, sizeof(struct sockaddr_in6));
+            ssize_t len = send(sfd, pkt.data, pkt.size, 0);
             if (len < 0) {
                 uniperror("send");
                 return -1;
@@ -679,6 +679,5 @@ ssize_t desync_udp(int sfd, char *buffer,
             return -1;
         }
     }
-    return sendto(sfd, buffer, n, 0, 
-        dst, sizeof(struct sockaddr_in6));
+    return send(sfd, buffer, n, 0);
 }
