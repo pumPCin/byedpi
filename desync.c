@@ -584,7 +584,7 @@ ssize_t desync(struct poolhd *pool,
         }
         
         if (s == ERR_WAIT) {
-            set_timer(pool, val, 10);
+            set_timer(pool, val, params.await_int);
             return lp - offset;
         }
         if (s < 0) {
