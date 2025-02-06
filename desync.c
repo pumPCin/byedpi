@@ -49,6 +49,7 @@ int setttl(int fd, int ttl)
     return 0;
 }
 
+
 #ifdef __linux__
 static int get_family(const struct sockaddr_in6 *dst)
 {
@@ -276,6 +277,7 @@ static HANDLE openTempFile(void)
         uniperror("GetTempFileName");
         return 0;
     }
+    LOG(LOG_L, "temp file: %s\n", path);
     
     HANDLE hfile = CreateFileA(path, GENERIC_READ | GENERIC_WRITE, 
         FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, CREATE_ALWAYS, 
@@ -474,10 +476,16 @@ static long gen_offset(long pos, int flag,
 }
 
 
-static ssize_t tamp(char *buffer, size_t bfsize, ssize_t n, 
+static void tamp(char *buffer, size_t bfsize, ssize_t *n, 
         const struct desync_params *dp, struct proto_info *info)
 {
-    if (dp->tlsrec_n && is_tls_chello(buffer, n)) {
+    if (dp->mod_http && is_http(buffer, *n)) {
+        LOG(LOG_S, "modify HTTP: n=%zd\n", *n);
+        if (mod_http(buffer, *n, dp->mod_http)) {
+            LOG(LOG_E, "mod http error\n");
+        }
+    }
+    else if (dp->tlsrec_n && is_tls_chello(buffer, *n)) {
         long lp = 0;
         struct part part;
         int i = 0, r = 0, rc = 0;
@@ -489,29 +497,31 @@ static ssize_t tamp(char *buffer, size_t bfsize, ssize_t n,
             }
             long pos = rc * 5;
             pos += gen_offset(part.pos, 
-                part.flag, buffer, n - pos, lp, info);
+                part.flag, buffer, *n - pos, lp, info);
                 
             if (part.pos < 0 || part.flag) {
                 pos -= 5;
             }
             pos += (long )part.s * (part.r - r);
             if (pos < lp) {
+                LOG(LOG_E, "tlsrec cancel: %ld < %ld\n", pos, lp);
                 break;
             }
             if (!part_tls(buffer + lp, 
-                    bfsize - lp, n - lp, pos - lp)) {
+                    bfsize - lp, *n - lp, pos - lp)) {
+                LOG(LOG_E, "tlsrec error: pos=%ld, n=%zd\n", pos, *n);
                 break;
             }
-            n += 5;
+            LOG(LOG_S, "tlsrec: pos=%ld, n=%zd\n", pos, *n);
+            *n += 5;
             lp = pos + 5;
         }
     }
-    return n;
 }
 
 
 ssize_t desync(struct poolhd *pool, 
-        struct eval *val, struct buffer *buff, ssize_t n)
+        struct eval *val, struct buffer *buff, ssize_t *np)
 {
     struct desync_params dp = params.dp[val->pair->attempt];
     struct proto_info info = { 0 };
@@ -522,14 +532,21 @@ ssize_t desync(struct poolhd *pool,
     ssize_t offset = buff->offset;
     ssize_t skip = val->pair->round_sent;
     
-    if (!val->recv_count && params.debug) {
-        init_proto_info(buffer, n, &info);
+    if (!skip && params.debug) {
+        init_proto_info(buffer, *np, &info);
         
-        if (!info.host_pos) {
-            INIT_HEX_STR(buffer, (n > 16 ? 16 : n));
+        if (info.host_pos) {
+            LOG(LOG_S, "host: %.*s (%d)\n",
+                info.host_len, buffer + info.host_pos, info.host_pos);
+        } else {
+            INIT_HEX_STR(buffer, (*np > 16 ? 16 : *np));
+            LOG(LOG_S, "bytes: %s (%zd)\n", HEX_STR, *np);
         }
     }
-    n = tamp(buffer, bfsize, n, &dp, &info);
+    if (!skip) {
+        tamp(buffer, bfsize, np, &dp, &info);
+    }
+    ssize_t n = *np;
     
     long lp = offset;
     struct part part;
@@ -550,11 +567,13 @@ ssize_t desync(struct poolhd *pool,
             continue;
         }
         if (pos < 0 || pos > n || pos < lp) {
+            LOG(LOG_E, "split cancel: pos=%ld-%ld, n=%zd\n", lp, pos, n);
             break;
         }
         ssize_t s = 0;
         
         if (sock_has_notsent(sfd)) {
+            LOG(LOG_S, "sock_has_notsent\n");
             s = ERR_WAIT;
         }
         else switch (part.m) {
@@ -585,6 +604,7 @@ ssize_t desync(struct poolhd *pool,
                 s = send(sfd, buffer + lp, pos - lp, 0);
                 break;
         }
+        LOG(LOG_S, "split: pos=%ld-%ld (%zd), m: %s\n", lp, pos, s, demode_str[part.m]);
         
         if (s == ERR_WAIT) {
             set_timer(pool, val, params.await_int);
@@ -597,13 +617,15 @@ ssize_t desync(struct poolhd *pool,
             return -1;
         } 
         else if (s != (pos - lp)) {
+            LOG(LOG_E, "%zd != %ld\n", s, pos - lp);
             return lp + s - offset;
         }
         lp = pos;
     }
     // send all/rest
     if (lp < n) {
-         if (send(sfd, buffer + lp, n - lp, 0) < 0) {
+        LOG((lp ? LOG_S : LOG_L), "send: pos=%ld-%zd\n", lp, n);
+        if (send(sfd, buffer + lp, n - lp, 0) < 0) {
             if (get_e() == EAGAIN) {
                 return lp - offset;
             }
