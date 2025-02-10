@@ -683,7 +683,6 @@ int on_tunnel(struct poolhd *pool, struct eval *val, int etype)
             return -1;
         }
         if (sn < n) {
-            val->buff = buff;
             buff->lock = n;
             buff->offset = sn;
             
