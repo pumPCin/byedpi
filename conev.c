@@ -59,7 +59,7 @@ struct eval *add_event(struct poolhd *pool, evcb_t cb,
     val->cb = cb;
 
     #ifndef NOEPOLL
-    struct epoll_event ev = { .events = EPOLLRDHUP | e, .data = {val} };
+    struct epoll_event ev = { .events = _POLLDEF | e, .data = {val} };
     if (epoll_ctl(pool->efd, EPOLL_CTL_ADD, fd, &ev)) {
         uniperror("add event");
         return 0;
@@ -68,7 +68,7 @@ struct eval *add_event(struct poolhd *pool, evcb_t cb,
     struct pollfd *pfd = &(pool->pevents[pool->count]);
     
     pfd->fd = fd;
-    pfd->events = POLLRDHUP | e;
+    pfd->events = _POLLDEF | e;
     pfd->revents = 0;
     #endif
 
@@ -174,7 +174,7 @@ int mod_etype(struct poolhd *pool, struct eval *val, int type)
 {
     assert(val->fd > 0);
     struct epoll_event ev = {
-        .events = EPOLLRDHUP | type, .data = {val}
+        .events = _POLLDEF | type, .data = {val}
     };
     return epoll_ctl(pool->efd, EPOLL_CTL_MOD, val->fd, &ev);
 }
@@ -213,7 +213,7 @@ struct eval *next_event(struct poolhd *pool, int *offs, int *typel, int ms)
 int mod_etype(struct poolhd *pool, struct eval *val, int type)
 {
    assert(val->index >= 0 && val->index < pool->count);
-   pool->pevents[val->index].events = POLLRDHUP | type;
+   pool->pevents[val->index].events = _POLLDEF | type;
    return 0;
 }
 #endif
@@ -325,18 +325,20 @@ void loop_event(struct poolhd *pool)
 
 struct buffer *buff_pop(struct poolhd *pool, size_t size)
 {
-    struct buffer *root = pool->root_buff;  
-    if (root) {
-        pool->root_buff = root->next;
-        return root;
+    struct buffer *buff = pool->root_buff;  
+    if (buff) {
+        pool->root_buff = buff->next;
+        pool->buff_count--;
     }
-    struct buffer *buff = malloc(sizeof(struct buffer) + size);
-    if (!buff) {
-        uniperror("malloc");
-        return 0;
+    else {
+        buff = malloc(sizeof(struct buffer) + size);
+        if (!buff) {
+            uniperror("malloc");
+            return 0;
+        }
+        memset(buff, 0, sizeof(struct buffer));
+        buff->size = size;
     }
-    memset(buff, 0, sizeof(struct buffer));
-    buff->size = size;
     return buff;
 }
 
@@ -346,10 +348,16 @@ void buff_push(struct poolhd *pool, struct buffer *buff)
     if (!buff) {
         return;
     }
+    if (pool->buff_count >= MAX_BUFF_INP) {
+        free(buff);
+        return;
+    }
     buff->lock = 0;
     buff->offset = 0;
     buff->next = pool->root_buff;
+    
     pool->root_buff = buff;
+    pool->buff_count++;
 }
 
 

@@ -37,6 +37,9 @@
 #define AUTO_NOBUFF -1
 #define AUTO_NOSAVE 0
 
+#define FM_RAND 1
+#define FM_ORIG 2
+
 enum demode {
     DESYNC_NONE,
     DESYNC_SPLIT,
@@ -47,7 +50,7 @@ enum demode {
 };
 
 #ifdef STR_MODE
-char *demode_str[] = {
+static const char *demode_str[] = {
     "DESYNC_NONE",
     "DESYNC_SPLIT",
     "DESYNC_DISORDER",
@@ -67,16 +70,19 @@ struct part {
 struct packet {
      ssize_t size;
      char  *data;
+     ssize_t off;
+     bool dynamic;
 };
 
 struct desync_params {
     int ttl;
-    char *ip_options;
-    ssize_t ip_options_len;
     bool md5sig;
     struct packet fake_data;
     int udp_fake_count;
-    int fake_offset;
+    struct part fake_offset;
+    int fake_sni_count;
+    const char **fake_sni_list;
+    int fake_mod;
     bool drop_sack;
     char oob_char[2];
     
@@ -93,6 +99,9 @@ struct desync_params {
     struct mphdr *ipset;
     uint16_t pf[2];
     int rounds[2];
+    
+    union sockaddr_u custom_dst_addr;
+    bool custom_dst;
     
     char *file_ptr;
     ssize_t file_size;
@@ -132,8 +141,6 @@ extern struct params params;
 extern struct packet fake_tls;
 extern struct packet fake_http;
 extern struct packet fake_udp;
-
-extern char ip_option[1];
 
 #define ASSERT(exp) \
     char t[(exp) ? 1 : -1];

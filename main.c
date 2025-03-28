@@ -25,22 +25,20 @@
     #define close(fd) closesocket(fd)
 #endif
 
-#define VERSION "16.6"
+#define VERSION "17"
 
 ASSERT(sizeof(struct in_addr) == 4)
 ASSERT(sizeof(struct in6_addr) == 16)
 
 
-char ip_option[1] = "\0";
-
 struct packet fake_tls = { 
-    sizeof(tls_data), tls_data 
+    sizeof(tls_data), tls_data, 0, 0
 },
 fake_http = { 
-    sizeof(http_data), http_data
+    sizeof(http_data), http_data, 0, 0
 },
 fake_udp = { 
-    sizeof(udp_data), udp_data
+    sizeof(udp_data), udp_data, 0, 0
 };
 
 
@@ -106,14 +104,15 @@ static const char help_text[] = {
     #ifdef FAKE_SUPPORT
     "    -f, --fake <pos_t>        Split and send fake packet\n"
     #ifdef __linux__
-    "    -k, --ip-opt[=f|:str]     IP options of fake packets\n"
     "    -S, --md5sig              Add MD5 Signature option for fake packets\n"
     #endif
-    "    -n, --tls-sni <str>       Change SNI in fake ClientHello\n"
+    "    -n, --fake-sni <str>      Change SNI in fake\n"
+    "                              Replaced: ? - rand let, # - rand num, * - rand let/num\n"
     #endif
     "    -t, --ttl <num>           TTL of fake packets, default 8\n"
-    "    -O, --fake-offset <n>     Fake data start offset\n"
+    "    -O, --fake-offset <pos_t> Fake data start offset\n"
     "    -l, --fake-data <f|:str>  Set custom fake packet\n"
+    "    -Q, --fake-tls-mod <r,o>  Modify fake TLS CH: rand,orig\n"
     "    -e, --oob-data <char>     Set custom OOB data\n"
     "    -M, --mod-http <h,d,r>    Modify HTTP: hcsmix,dcsmix,rmspace\n"
     "    -r, --tlsrec <pos_t>      Make TLS record at position\n"
@@ -165,14 +164,14 @@ const struct option options[] = {
     #ifdef FAKE_SUPPORT
     {"fake",          1, 0, 'f'},
     #ifdef __linux__
-    {"ip-opt",        2, 0, 'k'},
     {"md5sig",        0, 0, 'S'},
     #endif
-    {"tls-sni",       1, 0, 'n'},
+    {"fake-sni",      1, 0, 'n'},
     #endif
     {"ttl",           1, 0, 't'},
     {"fake-data",     1, 0, 'l'},
     {"fake-offset",   1, 0, 'O'},
+    {"fake-tls-mod",  1, 0, 'Q'},
     {"oob-data",      1, 0, 'e'},
     {"mod-http",      1, 0, 'M'},
     {"tlsrec",        1, 0, 'r'},
@@ -185,6 +184,7 @@ const struct option options[] = {
     {"protect-path",  1, 0, 'P'}, //
     #endif
     {"ipset",         1, 0, 'j'},
+    {"connect-to",    1, 0, 'C'}, //
     {0}
 };
     
@@ -577,10 +577,6 @@ void clear_params(void)
     if (params.dp) {
         for (int i = 0; i < params.dp_count; i++) {
             struct desync_params s = params.dp[i];
-            if (s.ip_options != ip_option) {
-                free(s.ip_options);
-                s.ip_options = ip_option;
-            }
             if (s.parts != 0) {
                 free(s.parts);
                 s.parts = 0;
@@ -604,6 +600,10 @@ void clear_params(void)
             if (s.ipset != 0) {
                 mem_destroy(s.ipset);
                 s.hosts = 0;
+            }
+            if (s.fake_sni_list != 0) {
+                free(s.fake_sni_list);
+                s.fake_sni_list = 0;
             }
         }
         free(params.dp);
@@ -914,41 +914,44 @@ int main(int argc, char **argv)
                 dp->ttl = val;
             break;
             
-        case 'k':
-            if (dp->ip_options) {
-                continue;
-            }
-            if (optarg)
-                dp->ip_options = ftob(optarg, &dp->ip_options_len);
-            else {
-                dp->ip_options = ip_option;
-                dp->ip_options_len = sizeof(ip_option);
-            }
-            if (!dp->ip_options) {
-                uniperror("read/parse");
-                invalid = 1;
-            }
-            break;
-            
         case 'S':
             dp->md5sig = 1;
             break;
             
         case 'O':
-            val = strtol(optarg, &end, 0);
-            if (val <= 0 || *end) 
+            if (parse_offset(&dp->fake_offset, optarg)) {
                 invalid = 1;
-            else
-                dp->fake_offset = val;
+                break;
+            } else dp->fake_offset.m = 1;
             break;
             
-        case 'n':
-            if (change_tls_sni(optarg, fake_tls.data, fake_tls.size)) {
-                fprintf(stderr, "error chsni\n");
-                clear_params();
-                return -1;
+        case 'Q':
+            end = optarg;
+            while (end && !invalid) {
+                switch (*end) {
+                    case 'r': 
+                        dp->fake_mod |= FM_RAND;
+                        break;
+                    case 'o': 
+                        dp->fake_mod |= FM_ORIG;
+                        break;
+                    default:
+                        invalid = 1;
+                        continue;
+                }
+                end = strchr(end, ',');
+                if (end) end++;
             }
-            printf("sni: %s\n", optarg);
+            break;
+            
+        case 'n':;
+            const char **p = add((void *)&dp->fake_sni_list,
+                    &dp->fake_sni_count, sizeof(optarg));
+            if (!p) {
+                invalid = 1;
+                continue;
+            }
+            *p = optarg;
             break;
             
         case 'l':
@@ -1072,6 +1075,13 @@ int main(int argc, char **argv)
             params.await_int = atoi(optarg);
             break;
             
+        case 'C':
+            if (get_addr(optarg, &dp->custom_dst_addr) < 0)
+                invalid = 1;
+            else
+                dp->custom_dst = 1;
+            break;
+
         #ifdef __linux__
         case 'P':
             params.protect_path = optarg;

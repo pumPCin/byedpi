@@ -31,11 +31,16 @@
 #endif
 
 #ifdef __APPLE__
-    #define POLLRDHUP POLLHUP
-#elif !defined POLLRDHUP
+    #define _POLLDEF POLLHUP
+#else
+    #define _POLLDEF 0
+#endif
+#ifndef POLLRDHUP
     #define POLLRDHUP 0
 #endif
 #define POLLTIMEOUT 0
+
+#define MAX_BUFF_INP 8
 
 struct poolhd;
 struct eval;
@@ -98,6 +103,7 @@ struct poolhd {
     
     struct eval *tv_start, *tv_end;
     struct buffer *root_buff;
+    int buff_count;
 };
 
 struct poolhd *init_pool(int count);
