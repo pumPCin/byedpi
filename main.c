@@ -32,13 +32,13 @@ ASSERT(sizeof(struct in6_addr) == 16)
 
 
 struct packet fake_tls = { 
-    sizeof(tls_data), tls_data, 0, 0
+    sizeof(tls_data), tls_data, 0,
 },
 fake_http = { 
-    sizeof(http_data), http_data, 0, 0
+    sizeof(http_data), http_data, 0,
 },
 fake_udp = { 
-    sizeof(udp_data), udp_data, 0, 0
+    sizeof(udp_data), udp_data, 0,
 };
 
 
@@ -153,6 +153,7 @@ const struct option options[] = {
     #ifdef TIMEOUT_SUPPORT
     {"timeout",       1, 0, 'T'},
     #endif
+    {"copy",          1, 0, 'B'},
     {"proto",         1, 0, 'K'},
     {"hosts",         1, 0, 'H'},
     {"pf",            1, 0, 'V'},
@@ -655,6 +656,8 @@ int main(int argc, char **argv)
     char *end = 0;
     bool all_limited = 1;
     
+    int curr_optind = 1;
+    
     struct desync_params *dp = add((void *)&params.dp,
         &params.dp_count, sizeof(struct desync_params));
     if (!dp) {
@@ -664,7 +667,6 @@ int main(int argc, char **argv)
     
     while (!invalid && (rez = getopt_long(
              argc, argv, opt, options, 0)) != -1) {
-
         switch (rez) {
         
         case 'N':
@@ -758,6 +760,10 @@ int main(int argc, char **argv)
             break;
             
         case 'A':
+            if (optind < curr_optind) {
+                optind = curr_optind;
+                continue;
+            }
             if (!(dp->hosts || dp->proto || dp->pf[0] || dp->detect || dp->ipset)) {
                 all_limited = 0;
             }
@@ -791,6 +797,24 @@ int main(int argc, char **argv)
             }
             if (dp->detect && params.auto_level == AUTO_NOBUFF) {
                 params.auto_level = AUTO_NOSAVE;
+            }
+            dp->_optind = optind;
+            break;
+            
+        case 'B':
+            if (optind < curr_optind) {
+                continue;
+            }
+            if (*optarg == 'i') {
+                dp->pf[0] = htons(1);
+                continue;
+            }
+            val = strtol(optarg, &end, 0);
+            if (val < 1 || val >= params.dp_count || *end) 
+                invalid = 1;
+            else {
+                curr_optind = optind;
+                optind = params.dp[val - 1]._optind;
             }
             break;
             

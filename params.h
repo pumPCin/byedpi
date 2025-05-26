@@ -71,7 +71,6 @@ struct packet {
      ssize_t size;
      char  *data;
      ssize_t off;
-     bool dynamic;
 };
 
 struct desync_params {
@@ -105,6 +104,8 @@ struct desync_params {
     
     char *file_ptr;
     ssize_t file_size;
+    
+    int _optind;
 };
 
 struct params {
