@@ -47,7 +47,7 @@ static int host_cmp(const struct elem *p, const struct elem *q)
     if (p->len == q->len 
             || (p->len > q->len ? pd[-1] : qd[-1]) == '.')
         return 0;
-    
+
     return p->len > q->len ? 1 : -1;
 }
 
@@ -97,7 +97,7 @@ struct elem *mem_add(struct mphdr *hdr, char *str, int len, size_t struct_size)
     e->len = len;
     e->cmp_type = hdr->cmp_type;
     e->data = str;
-    
+
     v = kavl_insert(my, &hdr->root, e, 0);
     while (e != v && e->len < v->len) {
         mem_delete(hdr, v->data, v->len);

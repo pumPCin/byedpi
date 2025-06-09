@@ -356,7 +356,7 @@ static int parse_ip(char *out, char *str, size_t size)
         *sep = 0;
     }
     int len = sizeof(struct in_addr);
-    
+
     if (inet_pton(AF_INET, str, out) <= 0) {
         if (inet_pton(AF_INET6, str, out) <= 0) {
             return 0;
@@ -443,7 +443,7 @@ int get_default_ttl(void)
 {
     int orig_ttl = -1, fd;
     socklen_t tsize = sizeof(orig_ttl);
-    
+
     if ((fd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
         uniperror("socket");
         return -1;
@@ -656,7 +656,7 @@ int main(int argc, char **argv)
             opt[o] = ':';
         }
     }
-
+    //
     params.laddr.in.sin_port = htons(1080);
     if (!ipv6_support()) {
         params.baddr.sa.sa_family = AF_INET;
@@ -761,7 +761,7 @@ int main(int argc, char **argv)
                 invalid = 1;
             break;
 
-// desync options
+        // desync options
 
         case 'F':
             params.tfo = 1;
@@ -774,7 +774,7 @@ int main(int argc, char **argv)
             else
                 params.auto_level = val;
             break;
-            
+
         case 'A':
             if (optind < curr_optind) {
                 optind = curr_optind;
@@ -1157,7 +1157,7 @@ int main(int argc, char **argv)
             return -1;
         }
     }
-    
+
     if (params.baddr.sa.sa_family != AF_INET6) {
         params.ipv6 = 0;
     }

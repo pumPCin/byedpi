@@ -410,7 +410,7 @@ bool is_http_redirect(
 {
     char *host = 0, *location;
     int len = parse_http(req, qn, &host, 0);
-    
+
     if (len <= 0 || sn < 29) {
         return 0;
     }
