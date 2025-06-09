@@ -7,7 +7,6 @@
 #include <assert.h>
 
 #include "mpool.h"
-#include "conev.h"
 
 #ifdef _WIN32
     #include <ws2tcpip.h>
@@ -60,6 +59,12 @@ static const char *demode_str[] = {
 };
 #endif
 
+union sockaddr_u {
+    struct sockaddr sa;
+    struct sockaddr_in in;
+    struct sockaddr_in6 in6;
+};
+
 struct part {
     int m;
     int flag;
@@ -84,38 +89,43 @@ struct desync_params {
     int fake_mod;
     bool drop_sack;
     char oob_char[2];
-    
+
     int parts_n;
     struct part *parts;
-    
+
     int mod_http;
     int tlsrec_n;
     struct part *tlsrec;
-    
+
     int proto;
     int detect;
     struct mphdr *hosts;
     struct mphdr *ipset;
     uint16_t pf[2];
     int rounds[2];
-    
+
     union sockaddr_u custom_dst_addr;
     bool custom_dst;
-    
+
     char *file_ptr;
     ssize_t file_size;
-    
+
     int _optind;
+    int id;
+    int fail_count;
+
+    struct desync_params *prev;
+    struct desync_params *next;
 };
 
 struct params {
-    int dp_count;
+    int dp_n;
     struct desync_params *dp;
     int await_int;
     bool wait_send;
     int def_ttl;
     bool custom_ttl;
-    
+
     bool tfo;
     unsigned int timeout;
     int auto_level;
@@ -131,7 +141,7 @@ struct params {
     union sockaddr_u baddr;
     union sockaddr_u laddr;
     struct mphdr *mempool;
-    
+
     const char *protect_path;
     const char *pid_file;
     int pid_fd;

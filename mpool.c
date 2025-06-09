@@ -11,7 +11,7 @@ static int bit_cmp(const struct elem *p, const struct elem *q)
     int len = q->len < p->len ? q->len : p->len;
     int df = len % 8, bytes = len / 8;
     int cmp = memcmp(p->data, q->data, bytes);
-    
+
     if (cmp || !df) {
         return cmp;
     }

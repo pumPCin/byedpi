@@ -16,14 +16,14 @@
 #ifdef _WIN32
     #include <winsock2.h>
     #include <ws2tcpip.h>
-    
+
     #define close(fd) closesocket(fd)
     #define SHUT_RDWR SD_BOTH
 #else
     #include <errno.h>
     #include <unistd.h>
     #include <fcntl.h>
-    
+
     #include <sys/socket.h>
     #include <arpa/inet.h>
     #include <netinet/tcp.h>
@@ -57,7 +57,7 @@ void map_fix(union sockaddr_u *addr, char f6)
         uint16_t t16;
         uint32_t o32;
     } *ipv6m = (void *)&addr->in6.sin6_addr;
-    
+
     if (addr->sa.sa_family == AF_INET && f6) {
         addr->sa.sa_family = AF_INET6;
         ipv6m->o32 = *(uint32_t *)(&addr->in.sin_addr);
@@ -122,13 +122,13 @@ static int resolve(const char *chost, int len,
         union sockaddr_u *addr, int type) 
 {
     struct addrinfo hints = {0}, *res = 0;
-    
+
     hints.ai_socktype = type;
     hints.ai_flags = AI_ADDRCONFIG;
     if (!params.resolve)
         hints.ai_flags |= AI_NUMERICHOST;
     hints.ai_family = params.ipv6 ? AF_UNSPEC : AF_INET;
-    
+
     char host[len + 1];
     host[len] = 0;
     memcpy(host, chost, len);
@@ -138,7 +138,7 @@ static int resolve(const char *chost, int len,
     }
     memcpy(addr, res->ai_addr, SA_SIZE(res->ai_addr));
     freeaddrinfo(res);
-    
+
     return 0;
 }
 
@@ -229,7 +229,7 @@ static int s4_get_addr(const char *buff,
         return -1;
     }
     const struct s4_req *r = (const struct s4_req *)buff;
-    
+
     if (r->cmd != S_CMD_CONN) {
         return -1;
     }
@@ -265,7 +265,7 @@ static int s5_get_addr(const char *buffer,
         return -S_ER_GEN;
     }
     const struct s5_req *r = (const struct s5_req *)buffer;
-    
+
     size_t o = (r->atp == S_ATP_I4 ? S_SIZE_I4 : 
             (r->atp == S_ATP_ID ? r->dst.id.len + S_SIZE_ID : 
             (r->atp == S_ATP_I6 ? S_SIZE_I6 : 0)));
@@ -277,7 +277,7 @@ static int s5_get_addr(const char *buffer,
             addr->in.sin_family = AF_INET;
             addr->in.sin_addr = r->dst.i4.ip;
             break;
-        
+
         case S_ATP_ID:
             if (!params.resolve) {
                 return -S_ER_ATP;
@@ -287,7 +287,7 @@ static int s5_get_addr(const char *buffer,
                 return -S_ER_HOST;
             }
             break;
-        
+
         case S_ATP_I6:
             if (!params.ipv6)
                 return -S_ER_ATP;
@@ -338,7 +338,7 @@ static int http_get_addr(
     char *host = 0;
     uint16_t port = 0;
     int host_len = parse_http(buff, n, &host, &port);
-    
+
     if (host_len < 3 || host_len > 255) {
         return -1;
     }
@@ -392,7 +392,7 @@ int create_conn(struct poolhd *pool,
         struct eval *val, const union sockaddr_u *dst, evcb_t next)
 {
     union sockaddr_u addr = *dst;
-    
+
     int sfd = remote_sock(&addr, SOCK_STREAM);
     if (sfd < 0) {
         return -1;
@@ -458,7 +458,7 @@ static int udp_associate(struct poolhd *pool,
         struct eval *val, const union sockaddr_u *dst)
 {
     union sockaddr_u addr = *dst;
-    
+
     int ufd = remote_sock(&addr, SOCK_DGRAM);
     if (ufd < 0) {
         return -1;
@@ -476,15 +476,15 @@ static int udp_associate(struct poolhd *pool,
         }
         pair->addr = addr;
     }
-    //
+//
     socklen_t sz = sizeof(addr);
-    
+
     if (getsockname(val->fd, &addr.sa, &sz)) {
         uniperror("getsockname");
         return -1;
     }
     addr.in.sin_port = 0;
-    
+
     int cfd = nb_socket(addr.sa.sa_family, SOCK_DGRAM);
     if (cfd < 0) {
         uniperror("socket");
@@ -510,11 +510,11 @@ static int udp_associate(struct poolhd *pool,
     val->pair = client;
     client->pair = pair;
     pair->pair = val;
-    
+
     client->flag = FLAG_CONN;
     client->addr = val->addr;
     client->addr.in.sin_port = 0;
-    
+
     sz = sizeof(addr);
     if (getsockname(cfd, &addr.sa, &sz)) {
         uniperror("getsockname");
@@ -574,7 +574,7 @@ static int on_accept(struct poolhd *pool, struct eval *val, int et)
 {
     union sockaddr_u client;
     struct eval *rval;
-    
+
     while (1) {
         socklen_t len = sizeof(client);
         #ifdef __linux__
@@ -630,7 +630,7 @@ int on_tunnel(struct poolhd *pool, struct eval *val, int etype)
 {
     ssize_t n = 0;
     struct eval *pair = val->pair;
-    
+
     if (etype & POLLOUT || etype == POLLTIMEOUT) {
         val = pair;
         pair = val->pair;
@@ -640,7 +640,7 @@ int on_tunnel(struct poolhd *pool, struct eval *val, int etype)
             return -1;
         }
         n = val->buff->lock - val->buff->offset;
-        
+
         bool wait = false;
         ssize_t sn = tcp_send_hook(pool, pair, val->buff, &val->buff->lock, &wait);
         if (sn < 0) {
@@ -653,7 +653,7 @@ int on_tunnel(struct poolhd *pool, struct eval *val, int etype)
         }
         buff_push(pool, val->buff);
         val->buff = 0;
-        
+
         if (mod_etype(pool, val, POLLIN) ||
                 mod_etype(pool, pair, POLLIN)) {
             uniperror("mod_etype");
@@ -674,7 +674,7 @@ int on_tunnel(struct poolhd *pool, struct eval *val, int etype)
         if (n < 0) {
             return -1;
         }
-        
+
         bool wait = false;
         ssize_t sn = tcp_send_hook(pool, pair, buff, &n, &wait);
         if (sn < 0) {
@@ -684,7 +684,7 @@ int on_tunnel(struct poolhd *pool, struct eval *val, int etype)
         if (sn < n || wait) {
             buff->lock = n;
             buff->offset = sn;
-            
+
             if (mod_etype(pool, val, 0) ||
                     mod_etype(pool, pair, !wait ? POLLOUT : 0)) {
                 uniperror("mod_etype");
@@ -707,7 +707,7 @@ int on_udp_tunnel(struct poolhd *pool, struct eval *val, int et)
     }
     char *data = buff->data;
     size_t data_len = buff->size;
-    
+
     if (val->flag != FLAG_CONN) {
         data += S_SIZE_I6;
         data_len -= S_SIZE_I6;
@@ -715,10 +715,10 @@ int on_udp_tunnel(struct poolhd *pool, struct eval *val, int et)
     union sockaddr_u addr = {0};
     struct eval *pair = val->flag == FLAG_CONN ?
         val->pair : val->pair->pair;
-    
+
     do {
         socklen_t asz = sizeof(addr);
-        
+
         ssize_t n = recvfrom(val->fd, data, data_len, 0, &addr.sa, &asz);
         if (n < 1) {
             if (n && get_e() == EAGAIN)
@@ -733,7 +733,7 @@ int on_udp_tunnel(struct poolhd *pool, struct eval *val, int et)
             pair->round_sent = 0;
         }
         ssize_t ns;
-        
+
         if (val->flag == FLAG_CONN) {
             if (!val->addr.in.sin_port) {
                 if (!addr_equ(&addr, &val->addr)) {
@@ -770,7 +770,7 @@ int on_udp_tunnel(struct poolhd *pool, struct eval *val, int et)
         else {
             map_fix(&addr, 0);
             memset(buff->data, 0, S_SIZE_I6);
-            
+
             int offs = s5_set_addr(data, S_SIZE_I6, &addr, 1);
             if (offs < 0 || offs > S_SIZE_I6) {
                 return -1;
@@ -799,7 +799,7 @@ int on_request(struct poolhd *pool, struct eval *val, int et)
         return -1;
     }
     int error = 0;
-    
+
     if (*buff->data == S_VER5) {
         if (val->flag != FLAG_S5) {
             if (auth_socks5(val->fd, buff->data, n)) {
@@ -840,7 +840,7 @@ int on_request(struct poolhd *pool, struct eval *val, int et)
     }
     else if (*buff->data == S_VER4) {
         val->flag = FLAG_S4;
-        
+
         error = s4_get_addr(buff->data, n, &dst);
         if (error) {
             if (resp_error(val->fd, error, FLAG_S4) < 0)
@@ -909,7 +909,7 @@ int on_ignore(struct poolhd *pool, struct eval *val, int etype)
 int start_event_loop(int srvfd)
 {
     server_fd = srvfd;
-    
+
     struct poolhd *pool = init_pool(params.max_open * 2 + 1);
     if (!pool) {
         close(srvfd);
@@ -921,7 +921,7 @@ int start_event_loop(int srvfd)
         return -1;
     }
     loop_event(pool);
-    
+
     destroy_pool(pool);
     return 0;
 }
@@ -963,7 +963,7 @@ int run(const union sockaddr_u *srv)
     #endif
     signal(SIGINT, on_cancel);
     signal(SIGTERM, on_cancel);
-    
+
     int fd = listen_socket(srv);
     if (fd < 0) {
         return -1;
