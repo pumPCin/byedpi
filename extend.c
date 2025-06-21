@@ -171,7 +171,7 @@ static int reconnect(struct poolhd *pool, struct eval *val, struct desync_params
     }
     val->pair = 0;
     del_event(pool, val);
-    
+
     client->cb = &on_tunnel;
 
     if (!client->buff) {
@@ -209,7 +209,7 @@ static bool check_ip(
 {
     int len = sizeof(dst->in.sin_addr);
     const char *data = (const char *)&dst->in.sin_addr;
-    
+
     if (dst->sa.sa_family == AF_INET6) {
         len = sizeof(dst->in6.sin6_addr);
         data = (const char *)&dst->in6.sin6_addr;
@@ -558,7 +558,7 @@ ssize_t tcp_recv_hook(struct poolhd *pool,
             return -1;
         }
     }
-//
+    //
     if (val->flag != FLAG_CONN 
             && !val->pair->recv_count 
             && (params.auto_level & AUTO_RECONN)

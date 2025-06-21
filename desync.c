@@ -77,7 +77,7 @@ static bool sock_has_notsent(int sfd)
 {
     struct tcp_info tcpi;
     socklen_t ts = sizeof(tcpi);
-    
+
     if (getsockopt(sfd, IPPROTO_TCP,
             TCP_INFO, (char *)&tcpi, &ts) < 0) {
         perror("getsockopt TCP_INFO");
@@ -133,7 +133,7 @@ static struct packet get_tcp_fake(const char *buffer, ssize_t n,
     do {
         if ((opt->fake_mod & FM_ORIG) && info->type == IS_HTTPS) {
             memcpy(p, buffer, n);
-            
+
             if (!sni || !change_tls_sni(sni, p, n, n)) {
                 break;
             }
@@ -392,7 +392,7 @@ static ssize_t send_oob(int sfd, char *buffer,
     }
     char rchar = buffer[pos];
     buffer[pos] = c[1] ? c[0] : 'a';
-    
+
     ssize_t len = send(sfd, buffer, pos + 1, MSG_OOB);
     buffer[pos] = rchar;
 
@@ -499,7 +499,7 @@ ssize_t desync(struct poolhd *pool,
 {
     struct desync_params dp = *val->pair->dp;
     struct proto_info info = { 0 };
-    
+
     int sfd = val->fd;
 
     char *buffer = buff->data;
@@ -536,7 +536,7 @@ ssize_t desync(struct poolhd *pool,
 
         long pos = gen_offset(part.pos, part.flag, buffer, n, lp, &info);
         pos += (long )part.s * (part.r - r);
-        
+
         if (((skip && pos < skip) 
                 || curr_part < part_skip) && !(part.flag & OFFSET_START)) {
             continue;

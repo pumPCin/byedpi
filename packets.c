@@ -199,13 +199,13 @@ static int resize_ech_ext(char *buffer,
     uint16_t enc_sz = ANTOHS(buffer, ech_offs + 4 + 6);
     ssize_t pay_offs = ech_offs + 4 + 8 + enc_sz;
     uint16_t pay_sz = ech_sz - (8 + enc_sz + 2);
-    
+
     if (pay_offs + 2 > n || pay_sz < -inc) {
         return 0;
     }
     SHTONA(buffer, ech_offs + 2, ech_sz + inc);
     SHTONA(buffer, pay_offs, pay_sz + inc);
-    
+
     memmove(buffer + ech_end + inc, buffer + ech_end, n - (ech_end + inc));
     return inc;
 }
@@ -217,7 +217,7 @@ static void resize_sni(char *buffer, ssize_t n,
     SHTONA(buffer, sni_offs + 2, new_sz + 5);
     SHTONA(buffer, sni_offs + 4, new_sz + 3);
     SHTONA(buffer, sni_offs + 7, new_sz);
-    
+
     ssize_t sni_end = sni_offs + 4 + sni_sz;
     memmove(buffer + sni_end + new_sz - (sni_sz - 5), buffer + sni_end, n - sni_end);
 }
@@ -227,10 +227,10 @@ int change_tls_sni(const char *host, char *buffer, ssize_t n, ssize_t nn)
 {
     merge_tls_records(buffer, n);
     int avail = nn < n ? nn - n : 0;
-    
+
     uint16_t r_sz = ANTOHS(buffer, 3);
     r_sz += avail;
-    
+
     size_t skip = find_ext_block(buffer, n);
     if (!skip) {
         return -1;
@@ -358,7 +358,7 @@ int parse_http(const char *buffer, size_t bsize, char **hs, uint16_t *port)
     }
     host += 6;
     for (; host < buff_end && *host == ' '; host++);
-    
+
     if (!(l_end = memchr(host, '\n', buff_end - host))) {
         return 0;
     }
@@ -366,7 +366,7 @@ int parse_http(const char *buffer, size_t bsize, char **hs, uint16_t *port)
 
     const char *h_end = l_end - 1;
     while (isdigit((unsigned char) *--h_end));
-    
+
     if (*h_end != ':') {
         if (port) *port = 80;
         h_end = l_end;
@@ -533,7 +533,7 @@ int part_tls(char *buffer, size_t bsize, ssize_t n, long pos)
     }
     memmove(buffer + 5 + pos + 5, buffer + 5 + pos, n - (5 + pos));
     memcpy(buffer + 5 + pos, buffer, 3);
-    
+
     SHTONA(buffer, 3, pos);
     SHTONA(buffer, 5 + pos + 3, r_sz - pos);
     return 5;
