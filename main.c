@@ -1213,7 +1213,9 @@ int main(int argc, char **argv)
     }
     #endif
     int status = run(&params.laddr);
-
+    
+    for (dp = params.dp; dp; dp = dp->next) {
+    }
     if (params.cache_file) {
         FILE *f;
         if (!strcmp(params.cache_file, "-"))
