@@ -38,7 +38,7 @@ static int host_cmp(const struct elem *p, const struct elem *q)
 {
     int len = q->len < p->len ? q->len : p->len;
     char *pd = p->data + p->len, *qd = q->data + q->len;
-    
+
     while (len-- > 0) {
         if (*--pd != *--qd) {
             return *pd < *qd ? -1 : 1;
