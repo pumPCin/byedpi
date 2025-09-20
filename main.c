@@ -26,7 +26,7 @@
     #define close(fd) closesocket(fd)
 #endif
 
-#define VERSION "17.2"
+#define VERSION "17.3"
 
 ASSERT(sizeof(struct in_addr) == 4)
 ASSERT(sizeof(struct in6_addr) == 16)
@@ -113,10 +113,11 @@ static const char help_text[] = {
     "    -t, --ttl <num>           TTL of fake packets, default 8\n"
     "    -O, --fake-offset <pos_t> Fake data start offset\n"
     "    -l, --fake-data <f|:str>  Set custom fake packet\n"
-    "    -Q, --fake-tls-mod <r,o>  Modify fake TLS CH: rand,orig\n"
+    "    -Q, --fake-tls-mod <flag> Modify fake TLS CH: rand,orig,msize=<int>\n"
     "    -e, --oob-data <char>     Set custom OOB data\n"
     "    -M, --mod-http <h,d,r>    Modify HTTP: hcsmix,dcsmix,rmspace\n"
     "    -r, --tlsrec <pos_t>      Make TLS record at position\n"
+    "    -m, --tlsminor <ver>      Change minor version of TLS\n"
     "    -a, --udp-fake <count>    UDP fakes count, default 0\n"
     #ifdef __linux__
     "    -Y, --drop-sack           Drop packets with SACK extension\n"
@@ -178,6 +179,7 @@ const struct option options[] = {
     {"oob-data",      1, 0, 'e'},
     {"mod-http",      1, 0, 'M'},
     {"tlsrec",        1, 0, 'r'},
+    {"tlsminor",      1, 0, 'm'},
     {"udp-fake",      1, 0, 'a'},
     {"def-ttl",       1, 0, 'g'},
     {"wait-send",     0, 0, 'Z'}, //
@@ -1008,6 +1010,15 @@ int main(int argc, char **argv)
                     case 'o': 
                         dp->fake_mod |= FM_ORIG;
                         break;
+                    case 'm': 
+                        if ((end = strchr(end, '='))) {
+                            val = strtol(end + 1, &end, 0);
+                            if (!(val > INT_MAX || (*end && *end != ','))) {
+                                dp->fake_tls_size = val;
+                                break;
+                            }
+                        }
+                        __attribute__((fallthrough));
                     default:
                         invalid = 1;
                         continue;
@@ -1079,6 +1090,16 @@ int main(int argc, char **argv)
                    || part->pos > 0xffff) {
                 invalid = 1;
                 break;
+            }
+            break;
+
+        case 'm':
+            val = strtol(optarg, &end, 0);
+            if (val <= 0 || val > 255 || *end) 
+                invalid = 1;
+            else {
+                dp->tlsminor = val;
+                dp->tlsminor_set = 1;
             }
             break;
 

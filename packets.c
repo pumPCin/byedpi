@@ -118,13 +118,14 @@ static size_t find_ext_block(const char *data, size_t size)
 }
 
 
-static void merge_tls_records(char *buffer, ssize_t n)
+static int merge_tls_records(char *buffer, ssize_t n)
 {
     if (n < 5) {
-        return;
+        return 0;
     }
     uint16_t full_sz = 0;
     uint16_t r_sz = ANTOHS(buffer, 3);
+    int i = 0;
 
     while (1) {
         full_sz += r_sz;
@@ -139,9 +140,11 @@ static void merge_tls_records(char *buffer, ssize_t n)
         }
         memmove(buffer + 5 + full_sz, 
             buffer + 10 + full_sz, n - (10 + full_sz));
+        i++;
     }
     SHTONA(buffer, 3, full_sz);
     SHTONA(buffer, 7, full_sz - 4);
+    return i * 5;
 }
 
 
@@ -163,6 +166,38 @@ static void copy_name(char *out, const char *name, size_t out_len)
             out[i] = name[i];
         }
     }
+}
+
+
+static int remove_ks_group(char *buffer,
+        ssize_t n, size_t skip, uint16_t group)
+{
+    ssize_t ks_offs = find_tls_ext_offset(0x0033, buffer, n, skip);
+    if (!ks_offs || ks_offs + 6 >= n) {
+        return 0;
+    }
+    int ks_sz = ANTOHS(buffer, ks_offs + 2);
+    if (ks_offs + 4 + ks_sz > n) {
+        return 0;
+    }
+    ssize_t g_offs = ks_offs + 4 + 2;
+    while (g_offs + 4 < ks_offs + 4 + ks_sz) {
+        uint16_t g_sz = ANTOHS(buffer, g_offs + 2);
+        if (ks_offs + 4 + g_sz > n) {
+            return 0;
+        }
+        uint16_t g_tp = ANTOHS(buffer, g_offs);
+        if (g_tp == group) {
+            ssize_t g_end = g_offs + 4 + g_sz;
+
+            memmove(buffer + g_offs, buffer + g_end, n - g_end);
+            SHTONA(buffer, ks_offs + 2, ks_sz - (4 + g_sz));
+            SHTONA(buffer, ks_offs + 4, ks_sz - (4 + g_sz) - 2);
+            return 4 + g_sz;
+        }
+        g_offs += 4 + g_sz;
+    }
+    return 0;
 }
 
 
@@ -200,8 +235,11 @@ static int resize_ech_ext(char *buffer,
     ssize_t pay_offs = ech_offs + 4 + 8 + enc_sz;
     uint16_t pay_sz = ech_sz - (8 + enc_sz + 2);
 
-    if (pay_offs + 2 > n || pay_sz < -inc) {
+    if (pay_offs + 2 > n) {
         return 0;
+    }
+    if (pay_sz < -inc) {
+        inc = -pay_sz;
     }
     SHTONA(buffer, ech_offs + 2, ech_sz + inc);
     SHTONA(buffer, pay_offs, pay_sz + inc);
@@ -225,8 +263,8 @@ static void resize_sni(char *buffer, ssize_t n,
 
 int change_tls_sni(const char *host, char *buffer, ssize_t n, ssize_t nn)
 {
-    merge_tls_records(buffer, n);
-    int avail = nn < n ? nn - n : 0;
+    int avail = merge_tls_records(buffer, n);
+    avail += (nn - n);
 
     uint16_t r_sz = ANTOHS(buffer, 3);
     r_sz += avail;
@@ -255,7 +293,10 @@ int change_tls_sni(const char *host, char *buffer, ssize_t n, ssize_t nn)
     if (avail) {
         avail -= resize_ech_ext(buffer, n, skip, avail);
     }
-    uint16_t exts[] = { 
+    if (avail < -50) {
+        avail += remove_ks_group(buffer, n, skip, 0x11ec);
+    }
+    static const uint16_t exts[] = { 
         0x0015, // padding
         0x0031, // post_handshake_auth
         0x0010, // ALPN
@@ -267,7 +308,7 @@ int change_tls_sni(const char *host, char *buffer, ssize_t n, ssize_t nn)
         0x001b, // compress_certificate
         0
     };
-    for (uint16_t *e = exts; avail && avail < 4; e++) {
+    for (const uint16_t *e = exts; avail && avail < 4; e++) {
         if (!*e) {
             return -1;
         }
@@ -281,9 +322,10 @@ int change_tls_sni(const char *host, char *buffer, ssize_t n, ssize_t nn)
     }
     copy_name(buffer + sni_offs + 9, host, new_sz);
 
+    if (avail > 0) {
+        avail -= resize_ech_ext(buffer, n, skip, avail);
+    }
     if (avail >= 4) {
-        avail += remove_tls_ext(buffer, n, skip, 0x0015);
-
         SHTONA(buffer, 5 + r_sz - avail, 0x0015);
         SHTONA(buffer, 5 + r_sz - avail + 2, avail - 4);
         memset(buffer + 5 + r_sz - avail + 4, 0, avail - 4);

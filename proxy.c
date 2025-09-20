@@ -759,6 +759,7 @@ int on_udp_tunnel(struct poolhd *pool, struct eval *val, int et)
                 if (params.baddr.sa.sa_family != addr.sa.sa_family) {
                     return -1;
                 }
+                INIT_ADDR_STR((addr));
                 if (connect(pair->fd, &addr.sa, SA_SIZE(&addr)) < 0) {
                     uniperror("connect");
                     return -1;

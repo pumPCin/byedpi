@@ -131,15 +131,22 @@ static struct packet get_tcp_fake(const char *buffer, ssize_t n,
         sni = opt->fake_sni_list[rand() % opt->fake_sni_count];
     }
     do {
+        ssize_t f_size = opt->fake_tls_size;
+        if (f_size < 0) {
+            f_size = n + f_size;
+        }
+        if (f_size > n || f_size <= 0) {
+            f_size = n;
+        }
         if ((opt->fake_mod & FM_ORIG) && info->type == IS_HTTPS) {
             memcpy(p, buffer, n);
 
-            if (!sni || !change_tls_sni(sni, p, n, n)) {
+            if (!sni || !change_tls_sni(sni, p, n, f_size)) {
                 break;
             }
         }
         memcpy(p, pkt.data, pkt.size);
-        if (sni && change_tls_sni(sni, p, pkt.size, n) < 0) {
+        if (sni && change_tls_sni(sni, p, pkt.size, f_size) < 0) {
             break;
         }
     } while(0);
@@ -462,6 +469,9 @@ static long gen_offset(long pos, int flag,
 static void tamp(char *buffer, size_t bfsize, ssize_t *n, 
         const struct desync_params *dp, struct proto_info *info)
 {
+    if (dp->tlsminor_set && is_tls_chello(buffer, *n)) {
+        ((uint8_t *)buffer)[2] = dp->tlsminor;
+    }
     if (dp->tlsrec_n && is_tls_chello(buffer, *n)) {
         long lp = 0;
         struct part part;
@@ -544,8 +554,11 @@ ssize_t desync(struct poolhd *pool,
         if (offset && pos < offset) {
             continue;
         }
-        if (pos < 0 || pos > n || pos < lp) {
+        if (pos < 0 || pos < lp) {
             break;
+        }
+        if (pos > n) {
+            pos = n;
         }
         ssize_t s = 0;
 
