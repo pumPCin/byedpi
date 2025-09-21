@@ -63,7 +63,7 @@ struct buffer {
 };
 
 struct eval {
-    int fd;    
+    int fd;
     int index;
     unsigned long long mod_iter;
     evcb_t cb;

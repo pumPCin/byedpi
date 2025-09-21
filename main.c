@@ -772,7 +772,6 @@ int main(int argc, char **argv)
             break;
 
         // desync options
-
         case 'F':
             params.tfo = 1;
             break;
