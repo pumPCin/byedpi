@@ -12,7 +12,7 @@ static int bit_cmp(const struct elem *p, const struct elem *q)
     int len = q->len < p->len ? q->len : p->len;
     int df = len % 8, bytes = len / 8;
     int cmp = memcmp(p->data, q->data, bytes);
-    
+
     if (cmp || !df) {
         return cmp;
     }
@@ -39,7 +39,7 @@ static int host_cmp(const struct elem *p, const struct elem *q)
 {
     int len = q->len < p->len ? q->len : p->len;
     char *pd = p->data + p->len, *qd = q->data + q->len;
-    
+
     while (len-- > 0) {
         if (*--pd != *--qd) {
             return *pd < *qd ? -1 : 1;
@@ -48,7 +48,7 @@ static int host_cmp(const struct elem *p, const struct elem *q)
     if (p->len == q->len 
             || (p->len > q->len ? pd[-1] : qd[-1]) == '.')
         return 0;
-    
+
     return p->len > q->len ? 1 : -1;
 }
 
@@ -110,7 +110,7 @@ void *mem_add(struct mphdr *hdr, char *str, int len, size_t struct_size)
     e->len = len;
     e->cmp_type = hdr->cmp_type;
     e->data = str;
-    
+
     v = kavl_insert(my, &hdr->root, e, 0);
     while (e != v && e->len < v->len) {
         mem_delete(hdr, v->data, v->len);
@@ -158,19 +158,19 @@ void dump_cache(struct mphdr *hdr, FILE *out)
         return;
     }
     time_t now = time(0);
-    
+
     kavl_itr_t(my) itr;
     kavl_itr_first(my, hdr->root, &itr);
     do {
         struct elem_i *p = (struct elem_i *)kavl_at(&itr);
         struct cache_key *key = (struct cache_key *)p->main.data;
-        
+
         char ADDR_STR[INET6_ADDRSTRLEN];
         if (key->family == AF_INET)
             inet_ntop(AF_INET, &key->ip.v4, ADDR_STR, sizeof(ADDR_STR));
         else
             inet_ntop(AF_INET6, &key->ip.v6, ADDR_STR, sizeof(ADDR_STR));
-        
+
         if (now > p->time + params.cache_ttl[p->time_inc - 1]) {
             continue;
         }
@@ -189,12 +189,12 @@ void load_cache(struct mphdr *hdr, FILE *in)
     for (int i = 0; ; i++) {
         char addr_str[INET6_ADDRSTRLEN] = { 0 };
         char host[256] = { 0 };
-        
+
         uint16_t port;
         uint64_t mask = 0;
         time_t cache_time;
         int cache_inc;
-        
+
         int c = fscanf(in, "0 %39s %hu %lu %jd %d %255s\n", 
             addr_str, &port, &mask, &cache_time, &cache_inc, host);
         if (c < 1) {
@@ -219,7 +219,7 @@ void load_cache(struct mphdr *hdr, FILE *in)
             key_size += sizeof(key.ip.v4);
         }
         key.port = htons(port);
-        
+
         struct cache_key *data = calloc(1, key_size);
         if (!data) {
             return;
@@ -236,7 +236,7 @@ void load_cache(struct mphdr *hdr, FILE *in)
         e->time = cache_time;
         e->time_inc = cache_inc;
         e->extra_len = strlen(host);
-        
+
         if (e->extra_len) {
             e->extra = malloc(e->extra_len + 1);
             memcpy(e->extra, host, e->extra_len + 1);

@@ -44,7 +44,7 @@ struct elem_i {
     struct elem main;
     unsigned int extra_len;
     char *extra;
-    
+
     uint64_t dp_mask;
     int detect;
     time_t time;

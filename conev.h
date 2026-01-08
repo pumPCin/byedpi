@@ -20,7 +20,7 @@
     #include <unistd.h>
     #include <time.h>
     #include <sys/mman.h>
-    
+
     #ifndef NOEPOLL
         #include <sys/epoll.h>
         #define POLLIN EPOLLIN
@@ -63,33 +63,33 @@ struct buffer {
 };
 
 struct eval {
-    int fd;    
+    int fd;
     int index;
     unsigned long long mod_iter;
     evcb_t cb;
-    
+
     long tv_ms;
     struct eval *tv_next, *tv_prev;
-    
+
     evcb_t after_conn_cb;
     int conn_state;
-    
+
     struct eval *pair;
     struct buffer *buff, *sq_buff;
     int flag;
     union sockaddr_u addr;
     char *host;
     int host_len;
-    
+
     ssize_t recv_count;
     ssize_t round_sent;
     unsigned int round_count;
-    
+
     struct desync_params *dp;
     uint64_t dp_mask;
     int detect;
     bool mark; //
-    
+
     bool restore_ttl;
     bool restore_md5;
     char *restore_fake;
@@ -112,7 +112,7 @@ struct poolhd {
 #endif
     unsigned long long iters;
     bool brk;
-    
+
     struct eval *tv_start, *tv_end;
     struct buffer *root_buff;
     int buff_count;

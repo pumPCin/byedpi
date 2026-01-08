@@ -91,35 +91,35 @@ struct desync_params {
     int fake_tls_size;
     bool drop_sack;
     char oob_char[2];
-    
+
     int parts_n;
     struct part *parts;
-    
+
     int mod_http;
     int tlsrec_n;
     struct part *tlsrec;
     uint8_t tlsminor;
     bool tlsminor_set;
-    
+
     int proto;
     int detect;
     struct mphdr *hosts;
     struct mphdr *ipset;
     uint16_t pf[2];
     int rounds[2];
-    
+
     union sockaddr_u ext_socks;
-    
+
     char *file_ptr;
     ssize_t file_size;
-    
+
     int _optind;
     int id;
     uint64_t bit;
     int fail_count;
     int pri;
     const char *str;
-    
+
     struct desync_params *prev;
     struct desync_params *next;
 };
@@ -131,7 +131,7 @@ struct params {
     bool wait_send;
     int def_ttl;
     bool custom_ttl;
-    
+
     bool tfo;
     unsigned int timeout;
     int auto_level;
@@ -148,7 +148,7 @@ struct params {
     union sockaddr_u baddr;
     union sockaddr_u laddr;
     struct mphdr *mempool;
-    
+
     const char *protect_path;
     const char *pid_file;
     int pid_fd;

@@ -19,7 +19,7 @@
     #include <netinet/in.h>
     #include <netinet/tcp.h>
     #include <sys/socket.h>
-    
+
     #define DAEMON
 #else
     #include <ws2tcpip.h>
@@ -46,7 +46,7 @@ fake_udp = {
 
 struct params params = {
     .await_int = 10,
-    
+
     .ipv6 = 1,
     .resolve = 1,
     .udp = 1,
@@ -145,7 +145,7 @@ const struct option options[] = {
     {"buf-size",      1, 0, 'b'},
     {"max-conn",      1, 0, 'c'},
     {"debug",         1, 0, 'x'},
-    
+
     #ifdef TCP_FASTOPEN_CONNECT
     {"tfo",           0, 0, 'F'},
     #endif
@@ -193,7 +193,7 @@ const struct option options[] = {
     {"comment",       1, 0, '#'}, //
     {0}
 };
-    
+
 
 ssize_t parse_cform(char *buffer, size_t blen, 
         const char *str, size_t slen)
@@ -242,7 +242,7 @@ char *data_from_str(const char *str, ssize_t *size)
         return 0;
     }
     ssize_t i = parse_cform(d, len, str, len);
-    
+
     char *m = len != i ? realloc(d, i) : 0;
     if (i == 0) {
         return 0;
@@ -259,7 +259,7 @@ char *ftob(const char *str, ssize_t *sl)
     }
     char *buffer = 0;
     long size;
-    
+
     FILE *file = fopen(str, "rb");
     if (!file) {
         return 0;
@@ -320,7 +320,7 @@ struct mphdr *parse_hosts(char *buffer, size_t size)
     bool drop = 0;
     char *end = buffer + size;
     char *e = buffer, *s = buffer;
-    
+
     for (; e <= end; e++) {
         if (e != end && *e != ' ' && *e != '\n' && *e != '\r') {
             if (lower_char(e)) {
@@ -339,13 +339,11 @@ struct mphdr *parse_hosts(char *buffer, size_t size)
             }
         } 
         else {
-            LOG(LOG_E, "invalid host: num: %zd \"%.*s\"\n", num + 1, ((int )(e - s)), s);
             drop = 0;
         }
         num++;
         s = e + 1;
     }
-    LOG(LOG_S, "hosts count: %zd\n", hdr->count);
     return hdr;
 }
 
@@ -362,7 +360,7 @@ static int parse_ip(char *out, char *str, size_t size)
         *sep = 0;
     }
     int len = sizeof(struct in_addr);
-    
+
     if (inet_pton(AF_INET, str, out) <= 0) {
         if (inet_pton(AF_INET6, str, out) <= 0) {
             return 0;
@@ -383,7 +381,7 @@ struct mphdr *parse_ipset(char *buffer, size_t size)
     size_t num = 0;
     char *end = buffer + size;
     char *e = buffer, *s = buffer;
-    
+
     for (; e <= end; e++) {
         if (e != end && *e != ' ' && *e != '\n' && *e != '\r') {
             continue;
@@ -395,20 +393,19 @@ struct mphdr *parse_ipset(char *buffer, size_t size)
         char ip[e - s + 1];
         ip[e - s] = 0;
         memcpy(ip, s, e - s);
-        
+
         num++;
         s = e + 1;
-        
+
         char ip_stack[sizeof(struct in6_addr)];
         int bits = parse_ip(ip_stack, ip, sizeof(ip));
         if (bits <= 0) {
-            LOG(LOG_E, "invalid ip: num: %zd\n", num);
             continue;
         }
         int len = bits / 8 + (bits % 8 ? 1 : 0);
         char *ip_raw = malloc(len);
         memcpy(ip_raw, ip_stack, len);
-        
+
         struct elem *elem = mem_add(hdr, ip_raw, bits, sizeof(struct elem));
         if (!elem) {
             free(ip_raw);
@@ -416,7 +413,6 @@ struct mphdr *parse_ipset(char *buffer, size_t size)
             return 0;
         }
     }
-    LOG(LOG_S, "ip count: %zd\n", hdr->count);
     return hdr;
 }
 
@@ -426,7 +422,7 @@ int get_addr(const char *str, union sockaddr_u *addr)
     uint16_t port = 0;
     const char *s = str, *e = 0;
     const char *end = 0, *p = str;
-    
+
     if (*str == '[') {
         e = strchr(str, ']');
         if (!e) return -1;
@@ -447,24 +443,24 @@ int get_addr(const char *str, union sockaddr_u *addr)
     char str_ip[(e - s) + 1];
     memcpy(str_ip, s, e - s);
     str_ip[e - s] = 0;
-    
+
     struct addrinfo hints = {0}, *res = 0;
-    
+
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_family = AF_UNSPEC;
     hints.ai_flags = AI_NUMERICHOST;
-    
+
     if (getaddrinfo(str_ip, 0, &hints, &res) || !res) {
         return -1;
     }
-    
+
     if (res->ai_addr->sa_family == AF_INET6)
         addr->in6.sin6_addr = (
             (struct sockaddr_in6 *)res->ai_addr)->sin6_addr;
     else
         addr->in.sin_addr = (
             (struct sockaddr_in *)res->ai_addr)->sin_addr;
-            
+
     addr->sa.sa_family = res->ai_addr->sa_family;
     if (port) {
         addr->in6.sin6_port = port;
@@ -478,7 +474,7 @@ int get_default_ttl(void)
 {
     int orig_ttl = -1, fd;
     socklen_t tsize = sizeof(orig_ttl);
-    
+
     if ((fd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
         uniperror("socket");
         return -1;
@@ -507,7 +503,7 @@ int parse_offset(struct part *part, const char *str)
 {
     char *end = 0;
     long val = strtol(str, &end, 0);
-    
+
     while (*end == ':') {
         long rs = strtol(end + 1, &end, 0);
         if (rs < 0 || rs > INT_MAX) {
@@ -583,7 +579,7 @@ static struct desync_params *add_group(struct desync_params *prev)
     dp->id = params.dp_n;
     dp->bit = 1 << dp->id;
     dp->str = "";
-    
+
     params.dp_n++;
     return dp;
 }
@@ -606,7 +602,7 @@ int init_pid_file(const char *fname)
     params.pid_file = fname;
     char pid_str[21];
     snprintf(pid_str, sizeof(pid_str), "%d", getpid());
-    
+
     write(params.pid_fd, pid_str, strlen(pid_str));
     return 0;
 }
@@ -653,7 +649,7 @@ int main(int argc, char **argv)
 {
     #ifdef _WIN32
     WSADATA wsa;
-    
+
     if (WSAStartup(MAKEWORD(2, 2), &wsa)) {
         uniperror("WSAStartup");
         return -1;
@@ -665,10 +661,10 @@ int main(int argc, char **argv)
     int optc = sizeof(options)/sizeof(*options);
     for (int i = 0, e = optc; i < e; i++)
         optc += options[i].has_arg;
-        
+
     char opt[optc + 1];
     opt[optc] = 0;
-    
+
     for (int i = 0, o = 0; o < optc; i++, o++) {
         opt[o] = options[i].val;
         for (int c = options[i].has_arg; c; c--) {
@@ -681,31 +677,31 @@ int main(int argc, char **argv)
     if (!ipv6_support()) {
         params.baddr.sa.sa_family = AF_INET;
     }
-    
+
     const char *pid_file = 0;
     bool daemonize = 0;
     const char *cache_file = 0;
-    
+
     int rez;
     int invalid = 0;
-    
+
     long val = 0;
     char *end = 0;
     bool all_limited = 1;
-    
+
     int curr_optind = 1;
-    
+
     struct desync_params *dp = add_group(0);
     if (!dp) {
         clear_params();
         return -1;
     }
     params.dp = dp;
-    
+
     while (!invalid && (rez = getopt_long(
              argc, argv, opt, options, 0)) != -1) {
         switch (rez) {
-        
+
         case 'N':
             params.resolve = 0;
             break;
@@ -723,12 +719,12 @@ int main(int argc, char **argv)
             params.transparent = 1;
             break;
         #endif
-        
+
         #ifdef DAEMON
         case 'D':
             daemonize = 1;
             break;
-            
+
         case 'w':
             pid_file = optarg;
             break;
@@ -741,12 +737,12 @@ int main(int argc, char **argv)
             printf("%s\n", VERSION);
             clear_params();
             return 0;
-        
+
         case 'i':
             if (get_addr(optarg, &params.laddr) < 0)
                 invalid = 1;
             break;
-            
+
         case 'p':
             val = strtol(optarg, &end, 0);
             if (val <= 0 || val > 0xffff || *end)
@@ -754,12 +750,12 @@ int main(int argc, char **argv)
             else
                 params.laddr.in.sin_port = htons(val);
             break;
-            
+
         case 'I':
             if (get_addr(optarg, &params.baddr) < 0)
                 invalid = 1;
             break;
-            
+
         case 'b':
             val = strtol(optarg, &end, 0);
             if (val <= 0 || val > INT_MAX/4 || *end)
@@ -767,7 +763,7 @@ int main(int argc, char **argv)
             else
                 params.bfsize = val;
             break;
-            
+
         case 'c':
             val = strtol(optarg, &end, 0);
             if (val <= 0 || val >= (0xffff/2) || *end) 
@@ -775,23 +771,23 @@ int main(int argc, char **argv)
             else
                 params.max_open = val;
             break;
-           
+
         case 'x': //
             params.debug = strtol(optarg, 0, 0);
             if (params.debug < 0)
                 invalid = 1;
             break;
-            
+
         case 'y': //
             params.cache_file = optarg;
             break;
-            
+
         // desync options
-        
+
         case 'F':
             params.tfo = 1;
             break;
-            
+
         case 'L':
             end = optarg;
             while (end && !invalid) {
@@ -820,7 +816,7 @@ int main(int argc, char **argv)
                 if (end) end++;
             }
             break;
-            
+
         case 'A':
             if (optind < curr_optind) {
                 optind = curr_optind;
@@ -861,7 +857,7 @@ int main(int argc, char **argv)
             }
             dp->_optind = optind;
             break;
-            
+
         case 'B':
             if (optind < curr_optind) {
                 continue;
@@ -872,7 +868,7 @@ int main(int argc, char **argv)
             }
             val = strtol(optarg, &end, 0);
             struct desync_params *itdp = params.dp;
-            
+
             while (itdp && itdp->id != val - 1) {
                 itdp = itdp->next;
             }
@@ -883,11 +879,11 @@ int main(int argc, char **argv)
                 optind = itdp->_optind;
             }
             break;
-        
+
         case '#':
             dp->str = optarg;
             break;
-            
+
         case 'u':
             val = strtol(optarg, &end, 0);
             if (val <= 0 || (unsigned long)val > UINT_MAX || *end) {
@@ -902,7 +898,7 @@ int main(int argc, char **argv)
             }
             *ct = (unsigned int )val;
             break;
-        
+
         case 'T':;
             #ifdef __linux__
             float f = strtof(optarg, &end);
@@ -915,7 +911,7 @@ int main(int argc, char **argv)
             else
                 params.timeout = val;
             break;
-            
+
         case 'K':
             end = optarg;
             while (end && !invalid) {
@@ -940,7 +936,7 @@ int main(int argc, char **argv)
                 if (end) end++;
             }
             break;
-            
+
         case 'H':;
             if (dp->file_ptr) {
                 continue;
@@ -958,7 +954,7 @@ int main(int argc, char **argv)
                 return -1;
             }
             break;
-            
+
         case 'j':;
             if (dp->ipset) {
                 continue;
@@ -977,7 +973,7 @@ int main(int argc, char **argv)
             }
             free(data);
             break;
-            
+
         case 's':
         case 'd':
         case 'o':
@@ -1006,7 +1002,7 @@ int main(int argc, char **argv)
                 case 'f': part->m = DESYNC_FAKE;
             }
             break;
-            
+
         case 't':
             val = strtol(optarg, &end, 0);
             if (val <= 0 || val > 255 || *end) 
@@ -1014,18 +1010,18 @@ int main(int argc, char **argv)
             else
                 dp->ttl = val;
             break;
-            
+
         case 'S':
             dp->md5sig = 1;
             break;
-            
+
         case 'O':
             if (parse_offset(&dp->fake_offset, optarg)) {
                 invalid = 1;
                 break;
             } else dp->fake_offset.m = 1;
             break;
-            
+
         case 'Q':
             end = optarg;
             while (end && !invalid) {
@@ -1053,7 +1049,7 @@ int main(int argc, char **argv)
                 if (end) end++;
             }
             break;
-            
+
         case 'n':;
             const char **p = add((void *)&dp->fake_sni_list,
                     &dp->fake_sni_count, sizeof(optarg));
@@ -1063,7 +1059,7 @@ int main(int argc, char **argv)
             }
             *p = optarg;
             break;
-            
+
         case 'l':
             if (dp->fake_data.data) {
                 continue;
@@ -1074,7 +1070,7 @@ int main(int argc, char **argv)
                 invalid = 1;
             }
             break;
-            
+
         case 'e':
             val = parse_cform(dp->oob_char, 1, optarg, strlen(optarg));
             if (val != 1) {
@@ -1082,7 +1078,7 @@ int main(int argc, char **argv)
             }
             else dp->oob_char[1] = 1;
             break;
-            
+
         case 'M':
             end = optarg;
             while (end && !invalid) {
@@ -1104,7 +1100,7 @@ int main(int argc, char **argv)
                 if (end) end++;
             }
             break;
-            
+
         case 'r':
             part = add((void *)&dp->tlsrec,
                 &dp->tlsrec_n, sizeof(struct part));
@@ -1118,7 +1114,7 @@ int main(int argc, char **argv)
                 break;
             }
             break;
-            
+
         case 'm':
             val = strtol(optarg, &end, 0);
             if (val <= 0 || val > 255 || *end) 
@@ -1128,7 +1124,7 @@ int main(int argc, char **argv)
                 dp->tlsminor_set = 1;
             }
             break;
-            
+
         case 'a':
             val = strtol(optarg, &end, 0);
             if (val < 0 || val > INT_MAX || *end)
@@ -1136,7 +1132,7 @@ int main(int argc, char **argv)
             else
                 dp->udp_fake_count = val;
             break;
-            
+
         case 'V':
             val = strtol(optarg, &end, 0);
             if (val <= 0 || val > USHRT_MAX)
@@ -1154,7 +1150,7 @@ int main(int argc, char **argv)
                     dp->pf[1] = htons(val);
             }
             break;
-            
+
         case 'R':
             val = strtol(optarg, &end, 0);
             if (val <= 0 || val > INT_MAX)
@@ -1172,7 +1168,7 @@ int main(int argc, char **argv)
                     dp->rounds[1] = val;
             }
             break;
-            
+
         case 'g':
             val = strtol(optarg, &end, 0);
             if (val <= 0 || val > 255 || *end)
@@ -1182,25 +1178,25 @@ int main(int argc, char **argv)
                 params.custom_ttl = 1;
             }
             break;
-            
+
         case 'Y':
             dp->drop_sack = 1;
             break;
-        
+
         case 'Z':
             params.wait_send = 1;
             break;
-        
+
         case 'W':
             params.await_int = atoi(optarg);
             break;
-            
+
         case 'C':
             if (get_addr(optarg, &dp->ext_socks) < 0 
                     || !dp->ext_socks.in6.sin6_port) 
                 invalid = 1;
             break;
-        
+
         #ifdef __linux__
         case 'P':
             params.protect_path = optarg;
@@ -1208,11 +1204,11 @@ int main(int argc, char **argv)
         #endif
         case 0:
             break;
-            
+
         case '?':
             clear_params();
             return -1;
-            
+
         default: 
             printf("?: %c\n", rez);
             clear_params();
@@ -1230,9 +1226,6 @@ int main(int argc, char **argv)
             clear_params();
             return -1;
         }
-    }
-    if ((size_t )params.dp_n > sizeof(dp->bit) * 8) {
-        LOG(LOG_E, "too many groups!\n");
     }
     if (params.baddr.sa.sa_family != AF_INET6) {
         params.ipv6 = 0;
@@ -1259,7 +1252,7 @@ int main(int argc, char **argv)
         return -1;
     }
     srand((unsigned int)time(0));
-    
+
     #ifdef DAEMON
     if (daemonize && daemon(0, 0) < 0) {
         clear_params();
@@ -1277,14 +1270,12 @@ int main(int argc, char **argv)
         else {
             load_cache(params.mempool, f);
             fclose(f);
-            LOG(LOG_S, "cache ip count: %zd\n", params.mempool->count);
         }
     }
-    
+
     int status = run(&params.laddr);
     
     for (dp = params.dp; dp; dp = dp->next) {
-        LOG(LOG_S, "group: %d (%s), triggered: %d, pri: %d\n", dp->id, dp->str, dp->fail_count, dp->pri);
     }
     if (params.cache_file) {
         FILE *f = 0;

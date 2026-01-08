@@ -2,7 +2,7 @@
 
 #ifdef _WIN32
     #include <ws2tcpip.h>
-    
+
     #ifndef TCP_MAXRT
     #define TCP_MAXRT 5
     #endif
@@ -51,7 +51,7 @@ static ssize_t serialize_addr(const union sockaddr_u *dst,
     out->port = dst->in.sin_port;
     out->family = dst->sa.sa_family;
     static const ssize_t c = offsetof(struct cache_key, ip.v4);
-    
+
     if (dst->sa.sa_family == AF_INET) {
         out->ip.v4 = dst->in.sin_addr;
         return c + sizeof(out->ip.v4);
@@ -67,14 +67,13 @@ static struct elem_i *cache_get(const union sockaddr_u *dst)
 {
     struct cache_key key = { 0 };
     int len = serialize_addr(dst, &key);
-    
+
     struct elem_i *val = mem_get(params.mempool, (char *)&key, len);
     if (!val) {
         return 0;
     }
     time_t t = time(0);
     if (t > val->time + params.cache_ttl[val->time_inc - 1]) {
-        LOG(LOG_S, "ignore: time=%jd, now=%jd, inc=%d\n", (intmax_t)val->time, (intmax_t)t, val->time_inc);
         return 0;
     }
     return val;
@@ -87,13 +86,13 @@ static struct elem_i *cache_add(
     struct cache_key key = { 0 };
     int cmp_len = serialize_addr(dst, &key);
     time_t t = time(0);
-    
+
     struct cache_key *data = calloc(1, cmp_len);
     if (!data) {
         return 0;
     }
     memcpy(data, &key, cmp_len);
-    
+
     struct elem_i *val = mem_add(params.mempool, (char *)data, cmp_len, sizeof(struct elem_i));
     if (!val) {
         uniperror("mem_add");
@@ -116,20 +115,19 @@ static struct elem_i *cache_add(
 int on_socks_recv(struct poolhd *pool, struct eval *val, int t)
 {
     struct s5_req r = { 0 };
-    
+
     ssize_t n = recv(val->fd, (char *)&r, sizeof(r), 0);
     if (n < 2) {
         uniperror("socks recv");
         return on_torst(pool, val);
     }
     if (r.ver != S_VER5 || r.cmd != 0x00) {
-        LOG(LOG_E, "socks answer: %d\n", r.cmd);
         return on_torst(pool, val);
     }
     if (val->conn_state != FLAG_S5) {
         r.cmd = S_CMD_CONN;
         int len = s5_set_addr((char *)&r, sizeof(r), &val->addr, 0);
-        
+
         if (send(val->fd, (char *)&r, len, 0) < 0) {
             uniperror("socks send");
             return on_torst(pool, val);
@@ -138,14 +136,14 @@ int on_socks_recv(struct poolhd *pool, struct eval *val, int t)
         return 0;
     }
     val->cb = val->after_conn_cb;
-    
+
     return (val->cb)(pool, val, POLLOUT);
 }
 
 int on_socks_conn(struct poolhd *pool, struct eval *val, int t)
 {
     static const char data[3] = "\x05\x01";
-    
+
     if (send(val->fd, (char *)data, sizeof(data), 0) < 0) {
         uniperror("socks send");
         return on_torst(pool, val);
@@ -164,7 +162,7 @@ int connect_hook(struct poolhd *pool, struct eval *val,
         const union sockaddr_u *dst, evcb_t next)
 {
     struct desync_params *dp = params.dp;
-    
+
     if (!val->dp_mask) {
         struct elem_i *e = cache_get(dst);
         if (e) {
@@ -184,7 +182,7 @@ int connect_hook(struct poolhd *pool, struct eval *val,
         val->dp_mask |= dp->bit;
     }
     val->dp = dp;
-    
+
     if (dp->ext_socks.in6.sin6_port) {
         int e = create_conn(pool, val, &dp->ext_socks, &on_socks_conn);
         if (!e) {
@@ -214,25 +212,25 @@ int socket_mod(int fd)
 static int reconnect(struct poolhd *pool, struct eval *val)
 {
     assert(val->flag == FLAG_CONN);
-    
+
     struct eval *client = val->pair;
-    
+
     if (connect_hook(pool, client, &val->addr, 
             client->sq_buff ? &on_tunnel : &on_connect)) {
         return -1;
     }
     val->pair = 0;
     del_event(pool, val);
-    
+
     client->cb = &on_tunnel;
-    
+
     if (client->sq_buff) {
         if (!client->buff) {
             client->buff = buff_pop(pool, client->sq_buff->size);
         }
         client->buff->lock = client->sq_buff->lock;
         memcpy(client->buff->data, client->sq_buff->data, client->buff->lock);
-        
+
         client->buff->offset = 0;
     }
     client->round_sent = 0;
@@ -263,7 +261,7 @@ static bool check_ip(
 {
     int len = sizeof(dst->in.sin_addr);
     const char *data = (const char *)&dst->in.sin_addr;
-    
+
     if (dst->sa.sa_family == AF_INET6) {
         len = sizeof(dst->in6.sin6_addr);
         data = (const char *)&dst->in6.sin6_addr;
@@ -302,7 +300,7 @@ static bool check_l34(struct desync_params *dp, int st, const union sockaddr_u *
     }
     if (dp->proto & IS_IPV4) {
         static const char *pat = "\0\0\0\0\0\0\0\0\0\0\xff\xff";
-        
+
         if (dst->sa.sa_family != AF_INET 
                 && memcmp(&dst->in6.sin6_addr, pat, 12)) {
             return 0;
@@ -327,21 +325,19 @@ static bool check_round(const int *nr, int r)
 
 static void swop_groups(struct desync_params *dpc, struct desync_params *dpn)
 {
-    LOG(LOG_S, "swop: %d <-> %d\n", dpc->id, dpn->id);
-    
     struct desync_params dpc_cp = *dpc;
     dpc->next = dpn->next;
     dpc->prev = dpn->prev;
-    
+
     dpn->prev = dpc_cp.prev;
     dpn->next = dpc_cp.next;
-    
+
     if (dpn->prev) 
         dpn->prev->next = dpn;
-    
+
     if (dpc->next)
         dpc->next->prev = dpc;
-    
+
     if (dpc_cp.next != dpn) {
         dpn->next->prev = dpn;
         dpc->prev->next = dpc;
@@ -352,7 +348,7 @@ static void swop_groups(struct desync_params *dpc, struct desync_params *dpn)
     }
     dpc->detect = dpn->detect;
     dpn->detect = dpc_cp.detect;
-    
+
     if (params.dp == dpc) params.dp = dpn;
 }
 
@@ -360,9 +356,9 @@ static void swop_groups(struct desync_params *dpc, struct desync_params *dpn)
 static int on_trigger(int type, struct poolhd *pool, struct eval *val, bool client_alive)
 {
     struct eval *lav = val->pair;
-    
+
     bool before_req = !lav->recv_count && !val->recv_count;
-    
+
     bool can_reconn = ((lav->sq_buff || before_req)
         && (params.auto_level & AUTO_RECONN) && client_alive
     );
@@ -370,7 +366,7 @@ static int on_trigger(int type, struct poolhd *pool, struct eval *val, bool clie
         return -1;
     }
     INIT_ADDR_STR((val->addr));
-    
+
     struct elem_i *cache = cache_add(&val->addr, &lav->host, lav->host_len);
     if (!cache) {
         return -1;
@@ -378,10 +374,10 @@ static int on_trigger(int type, struct poolhd *pool, struct eval *val, bool clie
     lav->dp->fail_count++;
     lav->dp_mask |= lav->dp->bit;
     lav->detect = type;
-    
+
     uint64_t uncheked = lav->dp_mask;
     struct desync_params *dp = params.dp, *next = 0;
-    
+
     for (; dp; dp = dp->next) {
         if (!uncheked && !dp->detect) {
             break;
@@ -404,16 +400,13 @@ static int on_trigger(int type, struct poolhd *pool, struct eval *val, bool clie
         lav->dp->pri++;
     }
     if (!next) {
-        LOG(LOG_S, "unreach ip: %s\n", ADDR_STR);
         cache->dp_mask = 0;
         cache->detect = 0;
         return -1;
     }
-    LOG(LOG_S, "save: ip=%s, id=%d\n", ADDR_STR, next->id);
-    
     cache->dp_mask |= lav->dp_mask;
     cache->detect = lav->detect;
-    
+
     if (can_reconn) {
         return reconnect(pool, val);
     }
@@ -438,7 +431,7 @@ int on_torst(struct poolhd *pool, struct eval *val)
 static int on_fin(struct poolhd *pool, struct eval *val)
 {
     bool is_client = val->flag != FLAG_CONN;
-    
+
     if (is_client) {
         val = val->pair;
     }
@@ -456,12 +449,12 @@ static int on_response(struct poolhd *pool, struct eval *val,
         const char *resp, ssize_t sn)
 {
     struct desync_params *dp = params.dp;
-    
+
     char *req = val->pair->sq_buff->data;
     ssize_t qn = val->pair->sq_buff->size;
-    
+
     val->pair->dp_mask |= val->pair->dp->bit;
-    
+
     for (; dp; dp = dp->next) {
         if (dp->bit & val->pair->dp_mask) {
             continue;
@@ -516,7 +509,7 @@ static int setup_conn(struct eval *client, const char *buffer, ssize_t n)
         save_hostname(client, buffer, n);
     }
     struct desync_params *dp = client->dp, *init_dp = client->dp;
-    
+
     for (; dp; dp = dp->next) {
         if (!(dp->bit & client->dp_mask) 
                 && (!dp->detect || (client->detect & dp->detect))
@@ -528,14 +521,13 @@ static int setup_conn(struct eval *client, const char *buffer, ssize_t n)
         client->dp_mask |= dp->bit;
     }
     if (!dp) {
-        LOG(LOG_E, "drop connection\n");
         return -1;
     }
     if ((params.auto_level & (AUTO_POST | AUTO_RECONN)) && params.dp->next) {
         client->mark = is_tls_chello(buffer, n);
     }
     client->dp = dp;
-    
+
     if (params.timeout 
             && set_timeout(client->pair->fd, params.timeout)) {
         return -1;
@@ -566,10 +558,10 @@ ssize_t tcp_send_hook(struct poolhd *pool,
     ssize_t sn = -1;
     int skip = remote->flag != FLAG_CONN; 
     size_t off = buff->offset;
-    
+
     if (!skip) {
         struct eval *client = remote->pair;
-    
+
         if (client->recv_count == *n 
                 && setup_conn(client, buff->data, *n) < 0) {
             return -1;
@@ -579,7 +571,6 @@ ssize_t tcp_send_hook(struct poolhd *pool,
             skip = 1;
         }
         else {
-            LOG(LOG_S, "desync TCP: group=%d, round=%d, fd=%d\n", client->dp->id, r, remote->fd);
             sn = desync(pool, remote, buff, n, wait);
         }
     }
@@ -626,7 +617,7 @@ ssize_t tcp_recv_hook(struct poolhd *pool,
     }
     if (val->flag == FLAG_CONN && !val->round_sent) {
         int *nr = val->pair->dp->rounds;
-        
+
         if (check_round(nr, val->round_count)
                 && !check_round(nr, val->round_count + 1)
                 && cancel_setup(val)) {
@@ -645,7 +636,7 @@ ssize_t tcp_recv_hook(struct poolhd *pool,
             }
         }
         val->sq_buff->lock += n;
-        
+
         if ((size_t )val->sq_buff->lock >= val->sq_buff->size) {
             free_first_req(pool, val);
         }
@@ -668,7 +659,7 @@ ssize_t udp_hook(struct eval *val,
 {
     struct eval *pair = val->pair->pair;
     int r = pair->round_count;
-    
+
     struct desync_params *dp = pair->dp;
     if (!dp) {
         for (dp = params.dp; ; dp = dp->next) {
@@ -685,7 +676,6 @@ ssize_t udp_hook(struct eval *val,
     if (!check_round(dp->rounds, r)) {
         return send(val->fd, buffer, n, 0);
     }
-    LOG(LOG_S, "desync UDP: group=%d, round=%d, fd=%d\n", dp->id, r, val->fd);
     return desync_udp(val->fd, buffer, n, &dst->sa, dp);
 }
 
@@ -696,7 +686,7 @@ static int protect(int conn_fd, const char *path)
     struct sockaddr_un sa;
     sa.sun_family = AF_UNIX;
     strcpy(sa.sun_path, path);
-    
+
     int fd = socket(AF_UNIX, SOCK_STREAM, 0);
     if (fd < 0) {
         uniperror("socket");  
@@ -705,7 +695,7 @@ static int protect(int conn_fd, const char *path)
     struct timeval tv = { .tv_sec = 1 };
     setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
     setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-    
+
     int err = connect(fd, (struct sockaddr *)&sa, sizeof(sa));
     if (err) {
         uniperror("connect");
@@ -715,7 +705,7 @@ static int protect(int conn_fd, const char *path)
     char buf[CMSG_SPACE(sizeof(fd))] = { 0 };
     struct iovec io = { .iov_base = "1", .iov_len = 1 };
     struct msghdr msg = { .msg_iov = &io };
-    
+
     msg.msg_iovlen = 1;
     msg.msg_control = buf;
     msg.msg_controllen = sizeof(buf);

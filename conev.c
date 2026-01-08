@@ -48,7 +48,6 @@ struct eval *add_event(struct poolhd *pool, evcb_t cb,
 {
     assert(fd > 0);
     if (pool->count >= pool->max) {
-        LOG(LOG_E, "add_event: pool is full\n");
         return 0;
     }
     struct eval *val = pool->links[pool->count];
@@ -67,7 +66,7 @@ struct eval *add_event(struct poolhd *pool, evcb_t cb,
     }
     #else
     struct pollfd *pfd = &(pool->pevents[pool->count]);
-    
+
     pfd->fd = fd;
     pfd->events = _POLLDEF | e;
     pfd->revents = 0;
@@ -81,9 +80,6 @@ struct eval *add_event(struct poolhd *pool, evcb_t cb,
 void del_event(struct poolhd *pool, struct eval *val) 
 {
     assert(val->fd >= -1 && val->mod_iter <= pool->iters);
-    LOG(LOG_S, "close: fd=%d (pair=%d), recv: %zd, rounds: %d\n", 
-        val->fd, val->pair ? val->pair->fd : -1, 
-        val->recv_count, val->round_count);
     if (val->fd == -1) {
         return;
     }
@@ -115,7 +111,7 @@ void del_event(struct poolhd *pool, struct eval *val)
     val->mod_iter = pool->iters;
     remove_timer(pool, val);
     pool->count--;
-    
+
     struct eval *ev = pool->links[pool->count];
     if (ev != val) 
     {
@@ -260,7 +256,7 @@ void set_timer(struct poolhd *pool, struct eval *val, long ms)
     }
     val->tv_next = next;
     val->tv_prev = prev;
-    
+
     if (next) {
         next->tv_prev = val;
     }
@@ -302,13 +298,13 @@ struct eval *next_event_tv(struct poolhd *pool, int *offs, int *type)
         return next_event(pool, offs, type, -1);
     }
     struct eval *val = 0;
-    
+
     int ms = pool->tv_start->tv_ms - time_ms();
     if (ms > 0) {
         val = next_event(pool, offs, type, ms);
     }
     else *type = POLLTIMEOUT;
-    
+
     if (!val && pool->tv_start && *type == POLLTIMEOUT) {
         val = pool->tv_start;
         remove_timer(pool, val);
@@ -320,7 +316,7 @@ struct eval *next_event_tv(struct poolhd *pool, int *offs, int *type)
 void loop_event(struct poolhd *pool)
 {
     int i = -1, etype = -1;
-    
+
     while (!pool->brk) {
         struct eval *val = next_event_tv(pool, &i, &etype);
         if (!val) {
@@ -329,8 +325,6 @@ void loop_event(struct poolhd *pool)
             uniperror("(e)poll");
             break;
         }
-        LOG(LOG_L, "new event: fd: %d, type: %d\n", val->fd, etype);
-        
         int ret = (*val->cb)(pool, val, etype);
         if (ret < 0) {
             del_event(pool, val);
@@ -352,8 +346,6 @@ struct buffer *buff_pop(struct poolhd *pool, size_t size)
             uniperror("malloc");
             return 0;
         }
-        LOG(LOG_S, "alloc new buffer\n");
-        
         memset(buff, 0, sizeof(struct buffer));
         buff->size = size;
     }
@@ -373,7 +365,7 @@ void buff_push(struct poolhd *pool, struct buffer *buff)
     buff->lock = 0;
     buff->offset = 0;
     buff->next = pool->root_buff;
-    
+
     pool->root_buff = buff;
     pool->buff_count++;
 }
@@ -387,6 +379,5 @@ void buff_destroy(struct buffer *root)
         root = root->next;
         free(c);
     }
-    LOG(LOG_S, "buffers count: %d\n", i);
 }
 
