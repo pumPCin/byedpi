@@ -75,6 +75,6 @@ int register_winsvc(int argc, char *argv[])
     }
     svc_argc = argc;
     svc_argv = argv;
-        
+
     return StartServiceCtrlDispatcher(ServiceTable);
 }
