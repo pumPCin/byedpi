@@ -12,7 +12,7 @@ static int bit_cmp(const struct elem *p, const struct elem *q)
     int len = q->len < p->len ? q->len : p->len;
     int df = len % 8, bytes = len / 8;
     int cmp = memcmp(p->data, q->data, bytes);
-    
+
     if (cmp || !df) {
         return cmp;
     }
@@ -39,7 +39,7 @@ static int host_cmp(const struct elem *p, const struct elem *q)
 {
     int len = q->len < p->len ? q->len : p->len;
     char *pd = p->data + p->len, *qd = q->data + q->len;
-    
+
     while (len-- > 0) {
         if (*--pd != *--qd) {
             return *pd < *qd ? -1 : 1;
@@ -48,7 +48,7 @@ static int host_cmp(const struct elem *p, const struct elem *q)
     if (p->len == q->len 
             || (p->len > q->len ? pd[-1] : qd[-1]) == '.')
         return 0;
-    
+
     return p->len > q->len ? 1 : -1;
 }
 
@@ -110,7 +110,7 @@ void *mem_add(struct mphdr *hdr, char *str, int len, size_t struct_size)
     e->len = len;
     e->cmp_type = hdr->cmp_type;
     e->data = str;
-    
+
     v = kavl_insert(my, &hdr->root, e, 0);
     while (e != v && e->len < v->len) {
         mem_delete(hdr, v->data, v->len);
@@ -162,7 +162,7 @@ void dump_cache(struct mphdr *hdr, FILE *out, struct desync_params *dp)
     do {
         struct elem_i *p = (struct elem_i *)kavl_at(&itr);
         struct cache_key *key = (struct cache_key *)p->main.data;
-        
+
         if (p->dp != dp) {
             continue;
         }
@@ -171,7 +171,7 @@ void dump_cache(struct mphdr *hdr, FILE *out, struct desync_params *dp)
             inet_ntop(AF_INET, &key->ip.v4, ADDR_STR, sizeof(ADDR_STR));
         else
             inet_ntop(AF_INET6, &key->ip.v6, ADDR_STR, sizeof(ADDR_STR));
-        
+
         int bitlen = p->main.len - offsetof(struct cache_key, ip.v4) * 8;
         fprintf(out, "0 %s %d %d %jd %.*s\n", 
             ADDR_STR, bitlen, ntohs(key->port),
@@ -187,11 +187,11 @@ void load_cache(struct mphdr *hdr, FILE *in, struct desync_params *dp)
     for (int i = 0; ; i++) {
         char addr_str[INET6_ADDRSTRLEN] = { 0 };
         char host[256] = { 0 };
-        
+
         int bitlen;
         uint16_t port;
         time_t cache_time;
-        
+
         int c = fscanf(in, "0 %39s %d %hu %jd %255s\n", 
             addr_str, &bitlen, &port, &cache_time, host);
         if (c < 1) {
@@ -200,7 +200,7 @@ void load_cache(struct mphdr *hdr, FILE *in, struct desync_params *dp)
         struct cache_key key = { 0 };
         int key_size = offsetof(struct cache_key, ip.v4);
         bitlen += key_size * 8;
-        
+
         if (inet_pton(AF_INET, addr_str, &key.ip.v4) <= 0) {
             if (inet_pton(AF_INET6, addr_str, &key.ip.v6) <= 0) {
                 continue;
@@ -217,13 +217,13 @@ void load_cache(struct mphdr *hdr, FILE *in, struct desync_params *dp)
             continue;
         }
         key.port = htons(port);
-        
+
         struct cache_key *data = calloc(1, key_size);
         if (!data) {
             return;
         }
         memcpy(data, &key, key_size);
-        
+
         struct elem_i *e = mem_add(hdr, (char *)data, bitlen, sizeof(struct elem_i));
         if (!e) {
             free(data);
@@ -232,7 +232,7 @@ void load_cache(struct mphdr *hdr, FILE *in, struct desync_params *dp)
         e->time = cache_time;
         e->extra_len = strlen(host);
         e->dp = dp;
-        
+
         if (e->extra_len > 1) {
             e->extra = malloc(e->extra_len + 1);
             memcpy(e->extra, host, e->extra_len + 1);

@@ -19,7 +19,7 @@
     #include <netinet/in.h>
     #include <netinet/tcp.h>
     #include <sys/socket.h>
-    
+
     #define DAEMON
 #else
     #include <ws2tcpip.h>
@@ -46,7 +46,7 @@ fake_udp = {
 
 struct params params = {
     .await_int = 10,
-    
+
     .ipv6 = 1,
     .resolve = 1,
     .udp = 1,
@@ -144,7 +144,7 @@ const struct option options[] = {
     {"buf-size",      1, 0, 'b'},
     {"max-conn",      1, 0, 'c'},
     {"debug",         1, 0, 'x'},
-    
+
     #ifdef TCP_FASTOPEN_CONNECT
     {"tfo",           0, 0, 'F'},
     #endif
@@ -193,7 +193,7 @@ const struct option options[] = {
     {"cache-merge",   1, 0, '/'},
     {0}
 };
-    
+
 
 ssize_t parse_cform(char *buffer, size_t blen, 
         const char *str, size_t slen)
@@ -242,7 +242,7 @@ char *data_from_str(const char *str, ssize_t *size)
         return 0;
     }
     ssize_t i = parse_cform(d, len, str, len);
-    
+
     char *m = len != i ? realloc(d, i) : 0;
     if (i == 0) {
         return 0;
@@ -259,7 +259,7 @@ char *ftob(const char *str, ssize_t *sl)
     }
     char *buffer = 0;
     long size;
-    
+
     FILE *file = fopen(str, "rb");
     if (!file) {
         return 0;
@@ -316,7 +316,7 @@ int parse_hosts(struct mphdr *hdr, char *buffer, size_t size)
     bool drop = 0;
     char *end = buffer + size;
     char *e = buffer, *s = buffer;
-    
+
     for (; e <= end; e++) {
         if (e != end && *e != ' ' && *e != '\n' && *e != '\r') {
             if (lower_char(e)) {
@@ -334,13 +334,11 @@ int parse_hosts(struct mphdr *hdr, char *buffer, size_t size)
             }
         } 
         else {
-            LOG(LOG_E, "invalid host: num: %zd \"%.*s\"\n", num + 1, ((int )(e - s)), s);
             drop = 0;
         }
         num++;
         s = e + 1;
     }
-    LOG(LOG_S, "hosts count: %zd\n", hdr->count);
     return 0;
 }
 
@@ -357,7 +355,7 @@ static int parse_ip(char *out, char *str, size_t size)
         *sep = 0;
     }
     int len = sizeof(struct in_addr);
-    
+
     if (inet_pton(AF_INET, str, out) <= 0) {
         if (inet_pton(AF_INET6, str, out) <= 0) {
             return 0;
@@ -374,7 +372,7 @@ int parse_ipset(struct mphdr *hdr, char *buffer, size_t size)
     size_t num = 0;
     char *end = buffer + size;
     char *e = buffer, *s = buffer;
-    
+
     for (; e <= end; e++) {
         if (e != end && *e != ' ' && *e != '\n' && *e != '\r') {
             continue;
@@ -386,27 +384,25 @@ int parse_ipset(struct mphdr *hdr, char *buffer, size_t size)
         char ip[e - s + 1];
         ip[e - s] = 0;
         memcpy(ip, s, e - s);
-        
+
         num++;
         s = e + 1;
-        
+
         char ip_stack[sizeof(struct in6_addr)];
         int bits = parse_ip(ip_stack, ip, sizeof(ip));
         if (bits <= 0) {
-            LOG(LOG_E, "invalid ip: num: %zd\n", num);
             continue;
         }
         int len = bits / 8 + (bits % 8 ? 1 : 0);
         char *ip_raw = malloc(len);
         memcpy(ip_raw, ip_stack, len);
-        
+
         struct elem *elem = mem_add(hdr, ip_raw, bits, sizeof(struct elem));
         if (!elem) {
             free(ip_raw);
             return -1;
         }
     }
-    LOG(LOG_S, "ip count: %zd\n", hdr->count);
     return 0;
 }
 
@@ -416,7 +412,7 @@ int get_addr(const char *str, union sockaddr_u *addr)
     uint16_t port = 0;
     const char *s = str, *e = 0;
     const char *end = 0, *p = str;
-    
+
     if (*str == '[') {
         e = strchr(str, ']');
         if (!e) return -1;
@@ -438,24 +434,24 @@ int get_addr(const char *str, union sockaddr_u *addr)
         char str_ip[(e - s) + 1];
         memcpy(str_ip, s, e - s);
         str_ip[e - s] = 0;
-        
+
         struct addrinfo hints = {0}, *res = 0;
-        
+
         hints.ai_socktype = SOCK_STREAM;
         hints.ai_family = AF_UNSPEC;
         hints.ai_flags = AI_NUMERICHOST;
-        
+
         if (getaddrinfo(str_ip, 0, &hints, &res) || !res) {
             return -1;
         }
-        
+
         if (res->ai_addr->sa_family == AF_INET6)
             addr->in6.sin6_addr = (
                 (struct sockaddr_in6 *)res->ai_addr)->sin6_addr;
         else
             addr->in.sin_addr = (
                 (struct sockaddr_in *)res->ai_addr)->sin_addr;
-                
+
         addr->sa.sa_family = res->ai_addr->sa_family;
         freeaddrinfo(res);
     }
@@ -499,7 +495,7 @@ int get_default_ttl(void)
 {
     int orig_ttl = -1, fd;
     socklen_t tsize = sizeof(orig_ttl);
-    
+
     if ((fd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
         uniperror("socket");
         return -1;
@@ -528,7 +524,7 @@ int parse_offset(struct part *part, const char *str)
 {
     char *end = 0;
     long val = strtol(str, &end, 0);
-    
+
     while (*end == ':') {
         long rs = strtol(end + 1, &end, 0);
         if (rs < 0 || rs > INT_MAX) {
@@ -607,7 +603,7 @@ static struct desync_params *add_group(struct desync_params *prev)
     dp->id = params.dp_n;
     dp->bit = 1 << dp->id;
     dp->str = "";
-    
+
     params.dp_n++;
     params.dp_full_mask |= dp->bit;
     return dp;
@@ -631,7 +627,7 @@ int init_pid_file(const char *fname)
     }
     char pid_str[21];
     snprintf(pid_str, sizeof(pid_str), "%d", getpid());
-    
+
     if (write(pid_fd, pid_str, strlen(pid_str)) < 0) {
         close(pid_fd);
         return -1;
@@ -667,7 +663,7 @@ void clear_params(char *line, char **argv)
         free(params.need_free[i]);
     }
     params.need_free_n = 0;
-    
+
     struct desync_params *dp = params.dp;
     while (dp) {
         free(dp->parts);
@@ -676,7 +672,7 @@ void clear_params(char *line, char **argv)
         free(dp->fake_sni_list);
         mem_destroy(dp->hosts);
         mem_destroy(dp->ipset);
-        
+
         struct desync_params *t = dp;
         dp = dp->next;
         memset(t, 0, sizeof(*t));
@@ -691,10 +687,10 @@ int parse_args(int argc, char **argv)
     int optc = sizeof(options)/sizeof(*options);
     for (int i = 0, e = optc; i < e; i++)
         optc += options[i].has_arg;
-        
+
     char opt[optc + 1];
     opt[optc] = 0;
-    
+
     for (int i = 0, o = 0; o < optc; i++, o++) {
         opt[o] = options[i].val;
         for (int c = options[i].has_arg; c; c--) {
@@ -711,29 +707,29 @@ int parse_args(int argc, char **argv)
     }
     int rez;
     int invalid = 0;
-    
+
     long val = 0;
     char *end = 0;
     bool all_limited = 1;
-    
+
     int curr_optind = 1;
-    
+
     params.mempool = mem_pool(MF_EXTRA, CMP_BITS);
     if (!params.mempool) {
         uniperror("mem_pool");
         return -1;
     }
-    
+
     struct desync_params *dp = add_group(0);
     if (!dp) {
         return -1;
     }
     params.dp = dp;
-    
+
     while (!invalid && (rez = getopt_long(
              argc, argv, opt, options, 0)) != -1) {
         switch (rez) {
-        
+
         case 'N':
             params.resolve = 0;
             break;
@@ -748,12 +744,12 @@ int parse_args(int argc, char **argv)
             params.mode = MODE_TRANSPARENT;
             break;
         #endif
-        
+
         #ifdef DAEMON
         case 'D':
             params.daemonize = 1;
             break;
-            
+
         case 'w':
             params.pid_file = optarg;
             break;
@@ -764,7 +760,7 @@ int parse_args(int argc, char **argv)
         case 'v':
             printf("%s\n", VERSION);
             return 1;
-        
+
         case 'i':;
             int mode = get_addr_scheme(optarg, &params.laddr);
             if (mode < 0)
@@ -772,7 +768,7 @@ int parse_args(int argc, char **argv)
             else
                 params.mode |= mode;
             break;
-            
+
         case 'p':
             val = strtol(optarg, &end, 0);
             if (val <= 0 || val > 0xffff || *end)
@@ -780,12 +776,12 @@ int parse_args(int argc, char **argv)
             else
                 params.laddr.in.sin_port = htons(val);
             break;
-            
+
         case 'I':
             if (get_addr(optarg, &params.baddr) < 0)
                 invalid = 1;
             break;
-            
+
         case 'b':
             val = strtol(optarg, &end, 0);
             if (val <= 0 || val > INT_MAX/4 || *end)
@@ -793,7 +789,7 @@ int parse_args(int argc, char **argv)
             else
                 params.bfsize = val;
             break;
-            
+
         case 'c':
             val = strtol(optarg, &end, 0);
             if (val <= 0 || val >= (0xffff/2) || *end) 
@@ -801,13 +797,13 @@ int parse_args(int argc, char **argv)
             else
                 params.max_open = val;
             break;
-           
+
         case 'x': //
             params.debug = strtol(optarg, 0, 0);
             if (params.debug < 0)
                 invalid = 1;
             break;
-            
+
         case 'y':
             dp->cache_file = optarg;
             if (!strcmp(dp->cache_file, "-")) {
@@ -819,16 +815,15 @@ int parse_args(int argc, char **argv)
             else {
                 load_cache(params.mempool, file, dp);
                 fclose(file);
-                LOG(LOG_S, "cache ip count: %zd\n", params.mempool->count);
             }
             break;
-            
+
         // desync options
-        
+
         case 'F':
             params.tfo = 1;
             break;
-            
+
         case 'L':
             end = optarg;
             while (end && !invalid) {
@@ -850,7 +845,7 @@ int parse_args(int argc, char **argv)
                 if (end) end++;
             }
             break;
-            
+
         case 'A':
             if (optind < curr_optind) {
                 optind = curr_optind;
@@ -899,7 +894,7 @@ int parse_args(int argc, char **argv)
             }
             dp->_optind = optind;
             break;
-            
+
         case 'B':
             if (optind < curr_optind) {
                 continue;
@@ -910,7 +905,7 @@ int parse_args(int argc, char **argv)
             }
             val = strtol(optarg, &end, 0);
             struct desync_params *itdp = params.dp;
-            
+
             while (itdp && itdp->id != val - 1) {
                 itdp = itdp->next;
             }
@@ -921,11 +916,11 @@ int parse_args(int argc, char **argv)
                 optind = itdp->_optind;
             }
             break;
-        
+
         case '#':
             dp->str = optarg;
             break;
-            
+
         case 'u':
             val = strtol(optarg, &end, 0);
             if (val <= 0 || *end) 
@@ -934,7 +929,7 @@ int parse_args(int argc, char **argv)
                 dp->cache_ttl = val;
             }
             break;
-        
+
         case '/':
             val = strtol(optarg, &end, 0);
             if (val < 0 || val > 32 || *end) 
@@ -942,11 +937,11 @@ int parse_args(int argc, char **argv)
             else 
                 params.cache_pre = 32 - val;
             break;
-            
+
         case 'T':;
             float f = strtof(optarg, &end);
             params.timeout = (f * 1000);
-            
+
             if (*end == ':') 
                 params.ptimeout = strtof(end + 1, &end) * 1000;
             if (*end == ':') 
@@ -955,9 +950,9 @@ int parse_args(int argc, char **argv)
                 params.to_bytes_lim = strtof(end + 1, &end);
             if (*end)
                 invalid = 1;
-                
+
             break;
-            
+
         case 'K':
             end = optarg;
             while (end && !invalid) {
@@ -982,7 +977,7 @@ int parse_args(int argc, char **argv)
                 if (end) end++;
             }
             break;
-            
+
         case 'H':
             if (!dp->hosts && 
                     !(dp->hosts = mem_pool(MF_STATIC, CMP_HOST))) {
@@ -1005,7 +1000,7 @@ int parse_args(int argc, char **argv)
                 return -1;
             }
             break;
-            
+
         case 'j':
             data = ftob(optarg, &size);
             if (!data) {
@@ -1023,7 +1018,7 @@ int parse_args(int argc, char **argv)
             }
             free(data);
             break;
-            
+
         case 's':
         case 'd':
         case 'o':
@@ -1051,7 +1046,7 @@ int parse_args(int argc, char **argv)
                 case 'f': part->m = DESYNC_FAKE;
             }
             break;
-            
+
         case 't':
             val = strtol(optarg, &end, 0);
             if (val <= 0 || val > 255 || *end) 
@@ -1059,18 +1054,18 @@ int parse_args(int argc, char **argv)
             else
                 dp->ttl = val;
             break;
-            
+
         case 'S':
             dp->md5sig = 1;
             break;
-            
+
         case 'O':
             if (parse_offset(&dp->fake_offset, optarg)) {
                 invalid = 1;
                 break;
             } else dp->fake_offset.m = 1;
             break;
-            
+
         case 'Q':
             end = optarg;
             while (end && !invalid) {
@@ -1098,7 +1093,7 @@ int parse_args(int argc, char **argv)
                 if (end) end++;
             }
             break;
-            
+
         case 'n':;
             const char **p = add((void *)&dp->fake_sni_list,
                     &dp->fake_sni_count, sizeof(optarg));
@@ -1108,7 +1103,7 @@ int parse_args(int argc, char **argv)
             }
             *p = optarg;
             break;
-            
+
         case 'l':
             if (dp->fake_data.data) {
                 continue;
@@ -1119,7 +1114,7 @@ int parse_args(int argc, char **argv)
                 invalid = 1;
             }
             break;
-            
+
         case 'e':
             val = parse_cform(dp->oob_char, 1, optarg, strlen(optarg));
             if (val != 1) {
@@ -1127,7 +1122,7 @@ int parse_args(int argc, char **argv)
             }
             else dp->oob_char[1] = 1;
             break;
-            
+
         case 'M':
             end = optarg;
             while (end && !invalid) {
@@ -1149,7 +1144,7 @@ int parse_args(int argc, char **argv)
                 if (end) end++;
             }
             break;
-            
+
         case 'r':
             part = add((void *)&dp->tlsrec,
                 &dp->tlsrec_n, sizeof(struct part));
@@ -1162,7 +1157,7 @@ int parse_args(int argc, char **argv)
                 break;
             }
             break;
-            
+
         case 'm':
             val = strtol(optarg, &end, 0);
             if (val <= 0 || val > 255 || *end) 
@@ -1172,7 +1167,7 @@ int parse_args(int argc, char **argv)
                 dp->tlsminor_set = 1;
             }
             break;
-            
+
         case 'a':
             val = strtol(optarg, &end, 0);
             if (val < 0 || val > INT_MAX || *end)
@@ -1180,7 +1175,7 @@ int parse_args(int argc, char **argv)
             else
                 dp->udp_fake_count = val;
             break;
-            
+
         case 'V':
             val = strtol(optarg, &end, 0);
             if (val <= 0 || val > USHRT_MAX)
@@ -1198,7 +1193,7 @@ int parse_args(int argc, char **argv)
                     dp->pf[1] = htons(val);
             }
             break;
-            
+
         case 'R':
             val = strtol(optarg, &end, 0);
             if (val <= 0 || val > INT_MAX)
@@ -1216,7 +1211,7 @@ int parse_args(int argc, char **argv)
                     dp->rounds[1] = val;
             }
             break;
-            
+
         case 'g':
             val = strtol(optarg, &end, 0);
             if (val <= 0 || val > 255 || *end)
@@ -1226,19 +1221,19 @@ int parse_args(int argc, char **argv)
                 params.custom_ttl = 1;
             }
             break;
-            
+
         case 'Y':
             dp->drop_sack = 1;
             break;
-        
+
         case 'Z':
             params.wait_send = 1;
             break;
-        
+
         case 'W':
             params.await_int = atoi(optarg);
             break;
-            
+
         case 'C':
             dp->out_type = get_addr_scheme(optarg, &dp->out_addr);
             if ((dp->out_type & OUT_SUPPORT) != dp->out_type
@@ -1248,7 +1243,7 @@ int parse_args(int argc, char **argv)
             if (!dp->out_type) dp->out_type = MODE_SOCKS5;
             params.delay_conn = 1;
             break;
-        
+
         #ifdef __linux__
         case 'P':
             params.protect_path = optarg;
@@ -1256,10 +1251,10 @@ int parse_args(int argc, char **argv)
         #endif
         case 0:
             break;
-            
+
         case '?':
             return -1;
-            
+
         default: 
             printf("?: %c\n", rez);
             return -1;
@@ -1275,9 +1270,6 @@ int parse_args(int argc, char **argv)
             return -1;
         }
     }
-    if ((size_t )params.dp_n > sizeof(dp->bit) * 8) {
-        LOG(LOG_E, "too many groups!\n");
-    }
     if (params.baddr.sa.sa_family != AF_INET6) {
         params.ipv6 = 0;
     }
@@ -1289,7 +1281,6 @@ int parse_args(int argc, char **argv)
 void dump_all_cache(void)
 {
     for (struct desync_params *dp = params.dp; dp; dp = dp->next) {
-        LOG(LOG_S, "group: %d (%s), triggered: %d, pri: %d\n", dp->id, dp->str, dp->fail_count, dp->pri);
         if (dp->cache_file) {
             if (!strcmp(dp->cache_file, "-")) {
                 dump_cache(params.mempool, stdout, dp);
@@ -1316,7 +1307,7 @@ int init(void)
         }
     }
     srand((unsigned int)time(0));
-    
+
     #ifdef DAEMON
     if (params.daemonize && daemon(0, 0) < 0) {
         return -1;
@@ -1334,7 +1325,7 @@ int main(int argc, char **argv)
 {
     #ifdef _WIN32
     WSADATA wsa;
-    
+
     if (WSAStartup(MAKEWORD(2, 2), &wsa)) {
         uniperror("WSAStartup");
         return -1;
@@ -1343,7 +1334,7 @@ int main(int argc, char **argv)
         return 0;
     }
     #endif
-    
+
     const char *local_port = getenv("SS_LOCAL_PORT");
     if (local_port) {
         params.laddr.in.sin_port = htons(atoi(local_port));
@@ -1356,15 +1347,15 @@ int main(int argc, char **argv)
     }
     char *cmd_line = 0;
     const char *env_options = getenv("SS_PLUGIN_OPTIONS");
-    
+
     if (env_options) {
         cmd_line = calloc(strlen(env_options) + 1, 1);
         strcpy(cmd_line, env_options);
-        
+
         argc = 1;
         argv = calloc(64, sizeof(char *));
         argv[0] = cmd_line;
-        
+
         for (char *c = cmd_line; *c && argc < 64; c++) {
             if (*c == ' ') {
                 *c = 0;
@@ -1375,15 +1366,14 @@ int main(int argc, char **argv)
             }
         }
     }
-    
+
     int status = parse_args(argc, argv);
     if (status) {
         clear_params(cmd_line, argv);
         return status - 1;
     }
     INIT_ADDR_STR(params.laddr);
-    LOG(LOG_S, "listen address: %s:%d\n", ADDR_STR, ntohs(params.laddr.in.sin_port));
-    
+
     if (init() < 0 || run(&params.laddr) < 0) {
         clear_params(cmd_line, argv);
         return -1;
