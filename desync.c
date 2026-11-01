@@ -615,7 +615,7 @@ ssize_t desync(struct poolhd *pool,
         val->pair->part_sent = curr_part;
 
         if (s == ERR_WAIT) {
-            set_timer(pool, val, params.await_int);
+            set_timer(pool, val, params.await_int, TV_DELAY);
             *wait = true;
             return lp - offset;
         }
@@ -632,7 +632,7 @@ ssize_t desync(struct poolhd *pool,
         if (sock_has_notsent(sfd) 
                 || (params.wait_send 
                     && curr_part > part_skip)) {
-            set_timer(pool, val, params.await_int);
+            set_timer(pool, val, params.await_int, TV_DELAY);
             *wait = true;
             return pos - offset;
         }
